@@ -1,0 +1,9 @@
+# Never commit these: addresses, tokens, photos and logs from a real StackChan.
+secrets/
+stackchan-ip.txt
+stackchan-remote-token.txt
+*.jpg
+*.log
+ir-raw.txt
+ir-log.txt
+stackchan-log.txt
