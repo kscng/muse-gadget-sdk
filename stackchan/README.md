@@ -21,7 +21,7 @@ Tested on one StackChan with Muse. Flashing custom firmware can brick a board; t
 | **Head movement** | Servos follow the avatar: idle glances, a sway while thinking, nods while speaking, a shake on errors, a wiggle with the hearts. Still while you hold PWR and while the screen sleeps. |
 | **Reply tone** | The first sentence of a reply picks a gesture: a question tilts, yes nods, no shakes, cheer bounces (English and Cantonese). |
 | **Petting** | The head touch strip wakes the screen, shows the hearts, and a long hold purrs. |
-| **Camera** | One photo on request: the Muse command `camera.capture`, and `GET /photo` over Wi-Fi. Nothing streams or is stored. |
+| **Camera** | One photo on request: the Muse command `camera.capture`, and `GET /photo` over Wi-Fi. A two-note beep warns that a photo is coming and a camera click marks the shot. Nothing streams or is stored. |
 | **Wi-Fi trigger** | A small HTTP server (token required): `POST /talk`, `/talk/down`, `/talk/up`, `GET /photo`, `GET /status`. |
 | **IR remote (experimental)** | Muse commands `ir.learn`, `ir.send`, `ir.list`. Untested end to end: the receiver saw no signal on the author's unit. |
 | **Long jobs** | A voice turn waits up to 15 minutes while Muse is still working, then speaks the answer. |

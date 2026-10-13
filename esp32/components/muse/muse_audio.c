@@ -338,3 +338,42 @@ void muse_audio_chirp(int rising)
     }
     muse_audio_write(buf, N);
 }
+
+/* One sample of a camera cue at index i (of MUSE_AUDIO_RATE). Generated in small pieces by the caller: a whole
+ * cue held in a buffer would sit in the scarce internal RAM that the camera's DMA needs. */
+static int16_t camera_cue_sample(int shutter, size_t i, uint32_t *rnd)
+{
+    if (!shutter) {
+        /* Two short notes, 880 Hz then 1320 Hz, with a gap: a "get ready". */
+        const size_t note = MUSE_AUDIO_RATE * 55 / 1000, gap = MUSE_AUDIO_RATE * 20 / 1000;
+        size_t pos = i % (note + gap);
+        float f = i < note + gap ? 880.0f : 1320.0f;
+        float x = (float)pos / note;
+        float v = pos < note ? sinf(2.0f * (float)M_PI * f * (float)i / MUSE_AUDIO_RATE) *
+                                   (x < 0.15f ? x / 0.15f : (1.0f - x) / 0.85f) : 0.0f;
+        return (int16_t)(v * 7000.0f);
+    }
+    /* A camera click: two quick noise bursts that die away, with a little 2.4 kHz in them. */
+    float t = (float)i / MUSE_AUDIO_RATE;
+    float t2 = t - 0.045f;
+    float env = expf(-t / 0.004f) + (t2 > 0 ? 0.7f * expf(-t2 / 0.005f) : 0.0f);
+    *rnd = *rnd * 1664525u + 1013904223u;
+    float noise = ((float)(*rnd >> 16) / 32768.0f) - 1.0f;
+    float v = (0.7f * noise + 0.5f * sinf(2.0f * (float)M_PI * 2400.0f * t)) * env;
+    v = v > 1.0f ? 1.0f : v < -1.0f ? -1.0f : v;
+    return (int16_t)(v * 9000.0f);
+}
+
+void muse_audio_camera_cue(int shutter)
+{
+    const size_t total = MUSE_AUDIO_RATE * (shutter ? 100 : 150) / 1000;
+    int16_t piece[160];   /* 10 ms */
+    uint32_t rnd = 12345;
+    for (size_t done = 0; done < total; done += sizeof(piece) / sizeof(piece[0])) {
+        size_t n = total - done < sizeof(piece) / sizeof(piece[0]) ? total - done : sizeof(piece) / sizeof(piece[0]);
+        for (size_t k = 0; k < n; k++) {
+            piece[k] = camera_cue_sample(shutter, done + k, &rnd);
+        }
+        muse_audio_write(piece, n);
+    }
+}

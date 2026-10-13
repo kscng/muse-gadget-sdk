@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "esp_video_device.h"
+#include "muse_audio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "bsp/esp-bsp.h"
@@ -56,6 +57,7 @@ static uint8_t *capture(size_t *len, const char **why)
     bool streaming = false;
     int fd = -1;
 
+    muse_audio_camera_cue(0);   /* "about to shoot" */
     if (!s_started) {
         esp_err_t err = bsp_camera_start(NULL);
         if (err != ESP_OK) {
@@ -119,6 +121,9 @@ static uint8_t *capture(size_t *len, const char **why)
     struct v4l2_buffer frame = {};
     int64_t t_stream = esp_timer_get_time();
     for (int n = 0; n <= SKIP_FRAMES; n++) {
+        if (n == SKIP_FRAMES) {
+            muse_audio_camera_cue(1);   /* the click, as the picture is taken */
+        }
         int64_t t0 = esp_timer_get_time();
         for (;;) {   /* non-blocking: EAGAIN until the next frame is ready */
             memset(&frame, 0, sizeof(frame));

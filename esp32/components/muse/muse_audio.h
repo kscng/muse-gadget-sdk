@@ -60,3 +60,6 @@ float muse_audio_level(const int16_t *mono, size_t frames);
 
 /* Short UI chirp: rising for "go", falling for "done". */
 void muse_audio_chirp(int rising);
+
+/* Cues for taking a photo: shutter 0 is a two-note beep ("about to shoot"), 1 is a camera click. Blocks ~0.1 s. */
+void muse_audio_camera_cue(int shutter);
