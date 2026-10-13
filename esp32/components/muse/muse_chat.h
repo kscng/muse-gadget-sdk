@@ -131,6 +131,10 @@ size_t muse_hatch_turn_audio_wait(const int16_t *pcm, size_t frames, int wait_ms
  * press ends a typed turn; a typed turn is refused while a voice turn runs.
  */
 void muse_hatch_text_turn(char *text);
+
+/* Starts a voice turn from text you already have (a transcript): posts it to the chat as "[StackChan] <text>" and
+ * waits for the reply as for any push-to-talk turn. Copies `text`. */
+void muse_hatch_turn_transcript(const char *text);
 void muse_hatch_text_cancel(void);
 
 /*

@@ -30,7 +30,7 @@
 #include "cJSON.h"
 
 #include "esp_heap_caps.h"
-#if CONFIG_MUSE_WATCHER_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_CORES3_CAMERA
 #include "freertos/idf_additions.h"
 #endif
 #include "esp_timer.h"
@@ -59,6 +59,9 @@
 #include "tunnel_netif.h"
 #include "net_discovery.h"
 #include "ota.h"
+#if CONFIG_HOMEHUB_STACKCHAN_IR
+#include "ir_remote.h"
+#endif
 #include "link_pairing.h"
 #include "bug_report.h"
 #include "diagnostic_log.h"
@@ -73,6 +76,9 @@
 #endif
 #if CONFIG_MUSE_WATCHER_CAMERA
 #include "boards/watcher_camera.h"
+#endif
+#if CONFIG_MUSE_CORES3_CAMERA
+#include "muse_camera.h"
 #endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
@@ -1559,7 +1565,7 @@ static void draw_url_done(const image_fetch_result_t *r, void *user) {
 }
 #endif
 
-#if CONFIG_MUSE_WATCHER_CAMERA
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_CORES3_CAMERA
 typedef struct {
     noise_ctrl_session_generation_t session_generation;
     char request_id[64];
@@ -1570,7 +1576,12 @@ static void watcher_camera_capture_task(void *arg) {
     char *image = NULL;
     const char *error = NULL;
     cJSON *result = cJSON_CreateObject();
+#if CONFIG_MUSE_CORES3_CAMERA
+    image = muse_camera_capture_base64(&error);
+    bool ok = image != NULL;
+#else
     bool ok = watcher_camera_capture(&image, &error);
+#endif
     cJSON_AddBoolToObject(result, "ok", ok);
     if (ok) {
         cJSON *payload = cJSON_AddObjectToObject(result, "payload");
@@ -1586,6 +1597,37 @@ static void watcher_camera_capture_task(void *arg) {
     free(args);
     stack_monitor_record(NULL);
     vTaskDeleteWithCaps(NULL);
+}
+#endif
+
+#if CONFIG_HOMEHUB_STACKCHAN_IR
+typedef struct {
+    noise_ctrl_session_generation_t session_generation;
+    char request_id[64];
+    char name[16];
+} ir_learn_args_t;
+
+static void ir_learn_task(void *arg) {
+    ir_learn_args_t *args = arg;
+    int pulses = 0;
+    esp_err_t err = ir_remote_learn(args->name, 15000, &pulses);
+    cJSON *result = cJSON_CreateObject();
+    cJSON_AddBoolToObject(result, "ok", err == ESP_OK);
+    if (err == ESP_OK) {
+        cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+        cJSON_AddStringToObject(payload, "name", args->name);
+        cJSON_AddNumberToObject(payload, "pulses", pulses);
+    } else {
+        cJSON *failure = cJSON_AddObjectToObject(result, "error");
+        cJSON_AddStringToObject(failure, "code", err == ESP_ERR_TIMEOUT ? "no_signal" : "ir_failed");
+        cJSON_AddStringToObject(failure, "message",
+                                err == ESP_ERR_TIMEOUT
+                                    ? "no remote signal was received; ask the person to press the button again, closer to the StackChan"
+                                    : esp_err_to_name(err));
+    }
+    noise_ctrl_send_command_result(args->session_generation, args->request_id, result);
+    free(args);
+    vTaskDelete(NULL);
 }
 #endif
 
@@ -1879,7 +1921,45 @@ static cJSON *on_ws_command(
         return result;
     }
 #endif
-#if CONFIG_MUSE_WATCHER_CAMERA
+#if CONFIG_HOMEHUB_STACKCHAN_IR
+    if (strcmp(command, "ir.learn") == 0 || strcmp(command, "ir.send") == 0) {
+        cJSON *n = params ? cJSON_GetObjectItem(params, "name") : NULL;
+        if (!cJSON_IsString(n) || !ir_remote_name_ok(n->valuestring)) {
+            return command_error("invalid_params", "name must be 1-15 lowercase letters, digits or _");
+        }
+        if (command[3] == 's') {   // ir.send
+            esp_err_t err = ir_remote_send(n->valuestring);
+            if (err == ESP_ERR_NOT_FOUND) return command_error("not_learned", "that button hasn't been learned; use ir.list");
+            if (err != ESP_OK) return command_error("ir_failed", esp_err_to_name(err));
+            cJSON *result = cJSON_CreateObject();
+            cJSON_AddBoolToObject(result, "ok", true);
+            return result;
+        }
+        ir_learn_args_t *args = calloc(1, sizeof(*args));
+        if (!args) return command_error("out_of_memory", "failed to allocate");
+        args->session_generation = session_generation;
+        strncpy(args->request_id, request_id, sizeof(args->request_id) - 1);
+        strncpy(args->name, n->valuestring, sizeof(args->name) - 1);
+        if (xTaskCreate(ir_learn_task, "ir_learn", 6144, args, 4, NULL) != pdPASS) {
+            free(args);
+            return command_error("out_of_memory", "failed to start task");
+        }
+        cJSON *async = cJSON_CreateObject();
+        cJSON_AddBoolToObject(async, "_async", true);
+        return async;
+    }
+    if (strcmp(command, "ir.list") == 0) {
+        char names[160];
+        int count = ir_remote_list(names, sizeof(names));
+        cJSON *result = cJSON_CreateObject();
+        cJSON_AddBoolToObject(result, "ok", true);
+        cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+        cJSON_AddStringToObject(payload, "names", names);
+        cJSON_AddNumberToObject(payload, "count", count);
+        return result;
+    }
+#endif
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_CORES3_CAMERA
     if (strcmp(command, "camera.capture") == 0) {
         watcher_camera_task_args_t *args = calloc(1, sizeof(*args));
         if (!args) return command_error("out_of_memory", "failed to allocate camera request");

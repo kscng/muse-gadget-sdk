@@ -33,6 +33,9 @@
 #include "muse_audio.h"
 #include "muse_mem.h"
 #include "muse_pmu.h"
+#if CONFIG_MUSE_STACKCHAN_HEAD
+#include "muse_head.h"
+#endif
 
 #define PMU_KEY_EVERY 2         /* poll the PMU over I2C every 20 ms */
 
@@ -43,6 +46,9 @@ static bool s_pmu;
 static esp_err_t init(void)
 {
     ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "i2c init");
+#if CONFIG_MUSE_STACKCHAN_HEAD
+    (void)muse_head_init(bsp_i2c_get_handle());   /* no StackChan body: the head just stays still */
+#endif
     /* Only the PMU sees PWR: latch its edges for poll_buttons(). Leave its
      * rails alone; the BSP owns them. */
     esp_err_t err = muse_pmu_init(bsp_i2c_get_handle(), true);

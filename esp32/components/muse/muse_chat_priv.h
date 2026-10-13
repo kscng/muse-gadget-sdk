@@ -68,9 +68,15 @@ static inline void muse_chat_reject(muse_chat_rejected_t *rejected, const char *
 }
 
 /* A voice note is a POST /chat/stream body: NOTE_HEAD, a base64 WAV, NOTE_TAIL. */
+/* A StackChan's notes carry its name in the file name, so Muse can tell them from the phone app's. */
+#if CONFIG_MUSE_STACKCHAN_HEAD
+#define MUSE_HATCH_NOTE_NAME "stackchan_voice_note.wav"
+#else
+#define MUSE_HATCH_NOTE_NAME "voice_note.wav"
+#endif
 #define MUSE_HATCH_NOTE_HEAD \
     "{\"message\":\"\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\"," \
-    "\"mime_type\":\"audio/wav\",\"filename\":\"voice_note.wav\",\"data_base64\":\""
+    "\"mime_type\":\"audio/wav\",\"filename\":\"" MUSE_HATCH_NOTE_NAME "\",\"data_base64\":\""
 #define MUSE_HATCH_NOTE_TAIL "\"}]}"
 #define MUSE_HATCH_WAV_HEADER 44
 

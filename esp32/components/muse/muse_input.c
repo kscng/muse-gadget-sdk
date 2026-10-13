@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
+#include "muse_audio.h"
 #include "muse_input.h"
+#if CONFIG_MUSE_REMOTE
+#include "muse_remote.h"
+#endif
 
 #include <stdint.h>
 #include <stdio.h>
@@ -744,7 +748,116 @@ esp_err_t muse_input_start(QueueHandle_t queue)
     }
     /* Bench-test and setup console; the input still works if it can't start. */
     xTaskCreate(serial_task, "muse_serial", 3584, NULL, 5, NULL);
+#if CONFIG_MUSE_REMOTE
+    muse_remote_start();
+#endif
     return ESP_OK;
+}
+
+void muse_input_wake(const char *why)
+{
+    set_asleep(false, why);
+    muse_state_poke();
+}
+
+void muse_input_remote_talk(bool down)
+{
+    if (down) {
+        set_asleep(false, "remote");
+        muse_state_poke();
+        /* The start cue. A hand on the button needs none (and a beep there would land on the first words), but a
+         * start from the app or the sensor does: you wait for it, then speak. It plays before recording begins, and
+         * the pause lets it leave the 320 ms pre-roll that the recording starts with. */
+        muse_audio_chirp(1);
+        vTaskDelay(pdMS_TO_TICKS(360));
+    } else {
+        muse_state_poke();
+    }
+    post(down ? MUSE_PTT_DOWN : MUSE_PTT_UP, false);
+}
+
+/* The mic level is muse_audio_level(): -54 dBFS is 0 and -12 dBFS is 1, 42 dB over the range. Speech and quiet are
+ * judged against the room's own noise: a fixed level fails in a room where a fan or an aircon already sits above it. */
+#define SPEECH_ABOVE_FLOOR 0.12f   /* about 5 dB over the room's noise */
+#define QUIET_ABOVE_FLOOR 0.08f    /* about 3.4 dB: lower than the above, so a trailing word doesn't flicker */
+#define QUIET_MS 1400
+#define NO_SPEECH_MS 6000
+#define TALK_POLL_MS 40
+#define CALIBRATE_POLLS 10         /* the first 0.4 s of live levels set the room's noise */
+#define ZERO_POLLS_DEAD_ROOM 40    /* all zeros for this long: the room really is silent */
+
+static volatile bool s_auto_talking;
+
+static void auto_talk_task(void *arg)
+{
+    (void)arg;
+    muse_input_remote_talk(true);
+    vTaskDelay(pdMS_TO_TICKS(400));   /* let the recording start */
+    int t = 0, quiet = 0, calib_n = 0, zero_polls = 0, log_at = 0;
+    bool spoke = false;
+    float floor = -1.0f, calib_sum = 0, level = 0;   /* floor: the room's noise level, once measured */
+    while (t < 15000) {
+        vTaskDelay(pdMS_TO_TICKS(TALK_POLL_MS));
+        t += TALK_POLL_MS;
+        float secs = 0;
+        if (muse_state_mode(&secs) != MUSE_MODE_LISTENING || secs < 0.15f) {
+            continue;   /* the recording hasn't started, or has ended */
+        }
+        level = muse_state_level();
+        if (floor < 0) {
+            /* Before the recording is live the level reads exactly 0: don't take that for a silent room. */
+            if (level > 0.0f) {
+                calib_sum += level;
+                if (++calib_n >= CALIBRATE_POLLS) floor = calib_sum / calib_n;
+            } else if (++zero_polls >= ZERO_POLLS_DEAD_ROOM) {
+                floor = 0.0f;
+            }
+            continue;
+        }
+        /* The floor drops quickly to any lower level, and follows quiet-ish levels up slowly; speech doesn't move it. */
+        if (level < floor) {
+            floor += (level - floor) * 0.15f;
+        } else if (level < floor + QUIET_ABOVE_FLOOR) {
+            floor += (level - floor) * 0.03f;
+        }
+        if (level > floor + SPEECH_ABOVE_FLOOR) {
+            spoke = true;
+            quiet = 0;
+        } else if (spoke) {
+            if (level < floor + QUIET_ABOVE_FLOOR) {
+                quiet += TALK_POLL_MS;
+                if (quiet >= QUIET_MS) break;
+            } else {
+                quiet = 0;   /* still above the room's noise: a word is trailing off */
+            }
+        } else if (t >= NO_SPEECH_MS) {
+            break;
+        }
+        if (t - log_at >= 1000) {
+            log_at = t;
+            ESP_LOGI(TAG, "listening: level %.2f, room noise %.2f, %s", (double)level, (double)floor,
+                     spoke ? (quiet ? "quiet" : "speaking") : "waiting for speech");
+        }
+    }
+    ESP_LOGI(TAG, "auto talk ended after %d ms (%s; room noise level %.2f, last level %.2f)", t,
+             t >= 15000 ? "hit the 15 s limit" : spoke ? "speech then quiet" : "no speech heard", (double)floor,
+             (double)level);
+    muse_input_remote_talk(false);
+    s_auto_talking = false;
+    vTaskDelete(NULL);
+}
+
+bool muse_input_talk_until_quiet(void)
+{
+    if (s_auto_talking || muse_state_mode(NULL) == MUSE_MODE_LISTENING) {
+        return false;
+    }
+    s_auto_talking = true;
+    if (xTaskCreate(auto_talk_task, "auto_talk", 3072, NULL, 5, NULL) != pdPASS) {
+        s_auto_talking = false;
+        return false;
+    }
+    return true;
 }
 
 void muse_input_request_power_off(void)

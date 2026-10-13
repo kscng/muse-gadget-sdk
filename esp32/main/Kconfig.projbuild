@@ -271,6 +271,34 @@ menu "ESP32 Device SDK"
             agent name (a still status screen on e-paper), and the display.*
             commands.
 
+    config HOMEHUB_STACKCHAN_IR
+        bool "StackChan infrared remote (learn and send buttons)"
+        depends on MUSE_BOARD_M5STACK_CORES3
+        default n
+        help
+            Adds the ir.learn, ir.send and ir.list commands: Muse can learn a
+            button from any infrared remote through the StackChan's receiver
+            and play it back with its IR LED, to switch an air conditioner
+            on and off, for example. Learned buttons are kept across restarts.
+
+    config HOMEHUB_IR_TX_GPIO
+        int "IR LED GPIO"
+        depends on HOMEHUB_STACKCHAN_IR
+        default 5
+
+    config HOMEHUB_IR_RX_GPIO
+        int "IR receiver GPIO"
+        depends on HOMEHUB_STACKCHAN_IR
+        default 10
+
+    config HOMEHUB_IR_CARRIER_HZ
+        int "IR carrier frequency (Hz)"
+        depends on HOMEHUB_STACKCHAN_IR
+        default 36700
+        help
+            Panasonic air conditioners use 36.7 kHz. Most other remotes use
+            38 kHz.
+
     config HOMEHUB_VOICE
         bool "Push-to-talk voice chat"
         depends on (HOMEHUB_LED_BACKEND_VOICE_RING || HOMEHUB_LED_BACKEND_RESPEAKER_LITE) && SPIRAM

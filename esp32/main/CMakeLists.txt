@@ -67,6 +67,7 @@ set(GADGET_REQUIRES
     # is loaded, so this is unconditional; unused code is not linked.
     esp_driver_i2s
     esp_driver_pcnt
+    esp_driver_rmt
 )
 
 # E-paper has its own status screen in place of led_status.c, with
@@ -94,6 +95,9 @@ if(CONFIG_HOMEHUB_SENSECAP_SENSORS)
 endif()
 if(CONFIG_HOMEHUB_RETERMINAL_SHT4X)
     list(APPEND GADGET_SRCS "reterminal_sht4x.c")
+endif()
+if(CONFIG_HOMEHUB_STACKCHAN_IR)
+    list(APPEND GADGET_SRCS "ir_remote.c" "ir_pulses.c")
 endif()
 
 if(CONFIG_HOMEHUB_VOICE)

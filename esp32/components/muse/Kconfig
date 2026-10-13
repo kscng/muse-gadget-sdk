@@ -190,4 +190,139 @@ menu "Muse"
             them. Needs PSRAM. Without it, voice notes go over Home Link's own
             session to its paired VM and replies are shown as text.
 
+    config MUSE_STACKCHAN_HEAD
+        bool "StackChan head: move the servos with the avatar"
+        depends on MUSE_BOARD_M5STACK_CORES3
+        default n
+        help
+            For a CoreS3 on an M5Stack StackChan body. Powers the two servos
+            and moves the head with the avatar state: looks up when
+            listening, sways when thinking, nods when speaking, glances
+            around when idle. Within conservative angle limits. Off leaves
+            the head alone.
+
+    config MUSE_STACKCHAN_PROX_DELTA
+        int "StackChan hand-near trigger (sensor counts above the room's level)"
+        depends on MUSE_STACKCHAN_HEAD
+        default 50
+        help
+            A hand held this close to the screen for a moment wakes the
+            device and starts it listening. The readings are logged
+            ("prox") so the distance can be tuned; bigger means closer.
+            0 turns the sensor off.
+
+    config MUSE_CORES3_CAMERA
+        bool "CoreS3 camera: photos on request (camera.capture, GET /photo)"
+        depends on MUSE_BOARD_M5STACK_CORES3
+        default n
+        help
+            Takes one photo with the CoreS3's GC0308 camera only when asked,
+            by Muse (camera.capture) or by a computer on the same Wi-Fi
+            (GET /photo with the network trigger token). Nothing streams and
+            nothing is stored on the device.
+
+    config MUSE_STACKCHAN_YAW_ZERO
+        int "StackChan left-right home position (servo steps)"
+        depends on MUSE_STACKCHAN_HEAD
+        default 461
+        help
+            Per unit; M5Stack's firmware stores it as zero_pos_1.
+
+    config MUSE_STACKCHAN_PITCH_ZERO
+        int "StackChan up-down home position (servo steps)"
+        depends on MUSE_STACKCHAN_HEAD
+        default 579
+        help
+            Per unit; M5Stack's firmware stores it as zero_pos_2.
+
+    config MUSE_REMOTE
+        bool "Network trigger for the talk button (HTTP, same Wi-Fi)"
+        depends on MUSE_HATCH
+        default n
+        help
+            Starts a small HTTP server so a computer on the same Wi-Fi can
+            make the device listen (POST /talk?secs=8) without a USB cable.
+            Needs a token; requests carry it in an X-Token header. On battery
+            the Wi-Fi naps when the screen has been asleep a while, and the
+            device can't be reached until it wakes.
+
+    config MUSE_REMOTE_TOKEN
+        string "Network trigger token"
+        depends on MUSE_REMOTE
+        default ""
+        help
+            Empty turns the trigger off. Keep it in the build's sdkconfig,
+            never in a committed file.
+
+    config MUSE_REMOTE_PORT
+        int "Network trigger port"
+        depends on MUSE_REMOTE
+        default 8080
+
+    config MUSE_ELEVENLABS_API_KEY
+        string "ElevenLabs API key (speaks Muse's replies)"
+        depends on MUSE_HATCH
+        default ""
+        help
+            Empty leaves replies as silent captions. The key ships inside the
+            firmware, so use a restricted text-to-speech key with a usage
+            limit. Keep it in the build's sdkconfig, never in a committed file.
+
+    config MUSE_MIC_BOOST
+        bool "Automatic boost for quiet speech"
+        depends on MUSE_HATCH
+        default n
+        help
+            The microphone's own gain is already at its maximum. This adds a
+            software boost to what is recorded: quiet speech is raised toward
+            a good level (never past clipping), loud speech is left alone,
+            and room noise isn't chased. The mic level used for the screen and
+            for stopping when you stop talking is not boosted.
+
+    config MUSE_MIC_BOOST_MAX_DB
+        int "Most the boost may add (dB)"
+        depends on MUSE_MIC_BOOST
+        default 15
+
+    config MUSE_MIC_BOOST_TARGET_DB
+        int "Speech level to aim for (dBFS, rms of a 20 ms chunk)"
+        depends on MUSE_MIC_BOOST
+        range -40 -10
+        default -26
+
+    config MUSE_SCRIBE_STT
+        bool "Transcribe speech with ElevenLabs Scribe (instead of Muse's own)"
+        depends on MUSE_HATCH
+        default n
+        help
+            After you stop talking, the recording is sent to ElevenLabs
+            Scribe v2 (the key above), and Muse gets the text as a chat
+            message starting with [StackChan]. If Scribe can't be reached the
+            recording goes to Muse as a voice note, as before. Needs the
+            ElevenLabs key; bills your ElevenLabs account (about $0.22 an hour
+            of audio).
+
+    config MUSE_SCRIBE_LANGUAGE
+        string "Scribe language hint"
+        depends on MUSE_SCRIBE_STT
+        default "yue"
+        help
+            ElevenLabs language code to expect. "yue" keeps Cantonese words
+            as Cantonese (without it they come back as Mandarin); English
+            speech and English words inside a sentence are still recognised.
+            Empty lets Scribe decide on its own.
+
+    config MUSE_ELEVENLABS_VOICE_ID
+        string "ElevenLabs voice ID"
+        depends on MUSE_HATCH
+        default "21m00Tcm4TlvDq8ikWAM"
+        help
+            Default is ElevenLabs' stock "Rachel" sample voice. Pick one that
+            suits your language (for Cantonese, one that handles it well).
+
+    config MUSE_ELEVENLABS_MODEL
+        string "ElevenLabs model ID"
+        depends on MUSE_HATCH
+        default "eleven_v4_turbo"
+
 endmenu

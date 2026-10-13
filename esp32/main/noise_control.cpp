@@ -1406,10 +1406,46 @@ static char *build_register_json(void) {
                 nullptr, nullptr);
 #endif
 
-#if CONFIG_MUSE_WATCHER_CAMERA
+#if CONFIG_HOMEHUB_STACKCHAN_IR
+    {
+        cJSON *ir_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(ir_required, "name",
+                              string_param("Button name: 1-15 lowercase letters, digits or _, "
+                                           "for example aircon_on or aircon_off."));
+        add_command(commands, "ir.learn",
+                    "Learn one infrared remote button. Tell the person to point the remote "
+                    "at the StackChan and press that button within 15 seconds; this call "
+                    "waits for it and saves it under `name`. Learn each button the person "
+                    "wants separately (an air conditioner remote sends its whole setting, "
+                    "so on at 25 and off are different buttons).",
+                    ir_required, nullptr);
+        cJSON_AddNumberToObject(cJSON_GetObjectItem(commands, "ir.learn"), "timeout_ms", 25000);
+
+        cJSON *ir_send_required = cJSON_CreateObject();
+        cJSON_AddItemToObject(ir_send_required, "name",
+                              string_param("Name of a learned button (see ir.list)."));
+        add_command(commands, "ir.send",
+                    "Send a learned infrared button with the StackChan's IR LED, "
+                    "for example to switch the air conditioner on or off. It must be "
+                    "in range of the unit.",
+                    ir_send_required, nullptr);
+
+        add_command(commands, "ir.list",
+                    "List the learned infrared button names, comma separated.",
+                    nullptr, nullptr);
+    }
+#endif
+
+#if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_CORES3_CAMERA
     add_command(commands, "camera.capture",
+#if CONFIG_MUSE_CORES3_CAMERA
+                "Take one still JPEG photo with the StackChan's camera, which looks where its head points. "
+                "Low resolution and fixed focus, best in good light. "
+                "The photo is returned as base64 only when this command is explicitly invoked.",
+#else
                 "Capture one still JPEG frame from the SenseCAP Watcher camera. "
                 "The frame is returned as base64 only when this command is explicitly invoked.",
+#endif
                 nullptr, nullptr);
     cJSON_AddNumberToObject(
         cJSON_GetObjectItem(commands, "camera.capture"), "timeout_ms", 30000);

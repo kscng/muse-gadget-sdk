@@ -36,6 +36,9 @@
 #include "muse_mem.h"
 #include "muse_settings.h"
 #include "muse_state.h"
+#if CONFIG_MUSE_SCRIBE_STT
+#include "muse_stt.h"
+#endif
 #include "muse_wifi.h"
 
 static const char *TAG = "muse_voice";
@@ -223,9 +226,62 @@ static void go_live(void)
     feed_live();
 }
 
+#if CONFIG_MUSE_MIC_BOOST
+/*
+ * Automatic boost for quiet speech, applied to each 20 ms chunk as it is kept. A chunk counts as speech when it
+ * is well above the room's noise floor; the boost aims its level at the target, never past -1.5 dBFS peak. It
+ * drops at once when speech gets louder and rises over about a quarter of a second, and between words it eases
+ * back, so noise isn't chased. Each recording starts from a mild boost so the first words aren't lost.
+ */
+#define BOOST_START_DB 6.0f
+#define BOOST_SPEECH_ABOVE_FLOOR_DB 9.0f
+static float s_boost_db = BOOST_START_DB;
+static float s_noise_db = -45.0f;
+
+static void boost_reset(void)
+{
+    s_boost_db = BOOST_START_DB;
+}
+
+static const int16_t *boost(const int16_t *in, int16_t *out)
+{
+    float db = muse_audio_dbfs(in, MUSE_AUDIO_CHUNK);
+    int peak = 1;
+    for (int i = 0; i < MUSE_AUDIO_CHUNK; i++) {
+        int v = abs(in[i]);
+        peak = v > peak ? v : peak;
+    }
+    /* The floor follows the quietest chunks, and creeps up slowly if the room gets noisier. */
+    s_noise_db = db < s_noise_db ? db : s_noise_db + 0.02f;
+    if (db > s_noise_db + BOOST_SPEECH_ABOVE_FLOOR_DB) {
+        float want = (float)CONFIG_MUSE_MIC_BOOST_TARGET_DB - db;
+        float peak_room = -1.5f - 20.0f * log10f((float)peak / 32768.0f);
+        want = want > peak_room ? peak_room : want;
+        want = want < 0.0f ? 0.0f : want > (float)CONFIG_MUSE_MIC_BOOST_MAX_DB ? (float)CONFIG_MUSE_MIC_BOOST_MAX_DB : want;
+        s_boost_db = want < s_boost_db ? want : s_boost_db + (want - s_boost_db) * 0.08f;
+    } else if (s_boost_db > BOOST_START_DB) {
+        s_boost_db -= 0.02f;   /* about 1 dB a second */
+    }
+    float g = powf(10.0f, s_boost_db / 20.0f);
+    for (int i = 0; i < MUSE_AUDIO_CHUNK; i++) {
+        float v = in[i] * g;
+        out[i] = (int16_t)(v > 32767.0f ? 32767 : v < -32768.0f ? -32768 : v);
+    }
+    return out;
+}
+#else
+static void boost_reset(void)
+{
+}
+#endif
+
 /* One chunk of speech: into the stats, and on to Hatch, by way of the kept note if there is one. */
 static void take(rec_stats_t *st, const int16_t *pcm)
 {
+#if CONFIG_MUSE_MIC_BOOST
+    int16_t boosted[MUSE_AUDIO_CHUNK];
+    pcm = boost(pcm, boosted);
+#endif
     keep(st, pcm, MUSE_AUDIO_CHUNK);
     if (!s_rec) {
         if (s_live) {
@@ -237,6 +293,19 @@ static void take(rec_stats_t *st, const int16_t *pcm)
     s_rec_n += MUSE_AUDIO_CHUNK;
     feed_live();
 }
+
+#if CONFIG_MUSE_SCRIBE_STT
+/* With Scribe, the note is kept whole in s_rec and transcribed after the release, not streamed to Muse as it goes. */
+static bool stt_on(void)
+{
+    return s_rec && muse_stt_enabled();
+}
+#else
+static bool stt_on(void)
+{
+    return false;
+}
+#endif
 
 /*
  * Records speech until release or MAX_SECS, starting with the pre-roll; *held
@@ -250,9 +319,10 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
 {
     muse_state_set_mode(MUSE_MODE_LISTENING);
     muse_state_set_progress(0);
+    boost_reset();
     s_rec_n = s_sent = 0;
     s_live = s_tried = false;
-    if (!s_rec || (muse_hatch_ready() && !s_held_count)) {
+    if (!s_rec || (!stt_on() && muse_hatch_ready() && !s_held_count)) {
         go_live();
     }
     muse_state_set_caption(s_live ? "LISTENING..." : "RECORDING...");
@@ -304,7 +374,7 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
         }
         n += MUSE_AUDIO_CHUNK;
         bool tick = n % (MUSE_AUDIO_CHUNK * 5) == 0;
-        if (tick && s_rec && !s_live && !gave_up && !s_held_count && muse_hatch_ready()) {
+        if (tick && s_rec && !s_live && !stt_on() && !gave_up && !s_held_count && muse_hatch_ready()) {
             ESP_LOGI(TAG, "Muse in reach: streaming the note so far");
             go_live();
         }
@@ -335,6 +405,10 @@ static bool record(bool barge_in, size_t *held, char *why, size_t cap)
     ESP_LOGI(TAG, "recorded %.2fs%s: rms %.1f dBFS, peak %.1f dBFS, floor %.1f dBFS, %d clipped, gain %d dB",
              (double)n / MUSE_AUDIO_RATE, released ? "" : " (max)", rms_db < -100.0f ? -100.0f : rms_db,
              20.0 * log10((st.peak + 1) / 32768.0), st.floor_db, st.clipped, muse_settings_mic_gain());
+#if CONFIG_MUSE_MIC_BOOST
+    ESP_LOGI(TAG, "software boost ended at +%.1f dB (limit +%d dB; the stats above include it)", (double)s_boost_db,
+             CONFIG_MUSE_MIC_BOOST_MAX_DB);
+#endif
     return ok;
 }
 
@@ -725,6 +799,25 @@ static bool finish_note(void)
             fed = true;
         }
         muse_audio_chirp(0);
+#if CONFIG_MUSE_SCRIBE_STT
+        if (!s_live && stt_on()) {
+            muse_state_set_mode(MUSE_MODE_THINKING);
+            muse_state_set_caption("WRITING IT DOWN...");
+            char *heard = muse_stt_transcribe(s_rec, s_rec_n);
+            if (heard && heard[0]) {
+                muse_hatch_turn_transcript(heard);
+                fed = true;
+            } else if (heard) {   /* the service answered: nobody spoke */
+                free(heard);
+                drop_rec();
+                go_idle("DIDN'T CATCH THAT");
+                return false;
+            } else {
+                go_live();   /* couldn't reach it: send the audio to Muse, as before */
+            }
+            if (fed) free(heard);
+        }
+#endif
         if (s_live && !fed) {
             /* Hatch is behind (still connecting, say): the rest from the kept note. */
             muse_state_set_mode(MUSE_MODE_THINKING);

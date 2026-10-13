@@ -46,5 +46,15 @@ typedef struct {
 /* PTT events are posted to `queue` (items are muse_input_event_t). */
 esp_err_t muse_input_start(QueueHandle_t queue);
 
+/* Acts as the talk button going down / up, waking the screen first (muse_remote.c). */
+void muse_input_remote_talk(bool down);
+
+/* Wakes the screen and listens like a held talk button, stopping about 1.4 s after you stop talking (or after
+ * 6 s of nobody talking, or the recording's own 15 s limit). False when it is already listening. */
+bool muse_input_talk_until_quiet(void);
+
+/* Wakes the screen (a touch on the head, say); `why` goes in the log. */
+void muse_input_wake(const char *why);
+
 /* Plays the goodbye animation and powers off (from the input task). */
 void muse_input_request_power_off(void);

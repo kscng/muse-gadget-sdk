@@ -45,6 +45,12 @@ if(CONFIG_MUSE_ENABLED)
     if(CONFIG_MUSE_HATCH)
         list(APPEND srcs "muse_chat.c" "muse_account_api.c" "muse_chat_session.cpp")
         list(APPEND embed "test_reply.mp3")   # muse_hatch_mp3_selftest
+        if(CONFIG_MUSE_SCRIBE_STT)
+            list(APPEND srcs "muse_stt.c")
+        endif()
+        if(CONFIG_MUSE_REMOTE)
+            list(APPEND srcs "muse_remote.c")
+        endif()
     else()
         list(APPEND srcs "muse_chat_link.c")   # text replies over Link's session
     endif()
@@ -90,6 +96,12 @@ if(CONFIG_MUSE_ENABLED)
         list(APPEND srcs "boards/board_m5stack_stopwatch.c" "boards/muse_lcd_bands.c")
     elseif(CONFIG_MUSE_BOARD_M5STACK_CORES3)
         list(APPEND srcs "boards/board_m5stack_cores3.c")
+        if(CONFIG_MUSE_CORES3_CAMERA)
+            list(APPEND srcs "muse_camera.c")
+        endif()
+        if(CONFIG_MUSE_STACKCHAN_HEAD)
+            list(APPEND srcs "muse_head.c" "muse_head_tone.c")
+        endif()
     elseif(CONFIG_MUSE_BOARD_M5STACK_CORE2)
         list(APPEND srcs "boards/board_m5stack_core2.c")
     elseif(CONFIG_MUSE_BOARD_FNK0104B)
@@ -112,7 +124,7 @@ endif()
 
 set(muse_priv_requires
     esp_timer esp_driver_usb_serial_jtag esp_psram nvs_flash
-    bt esp-tls mbedtls esp_app_format esp_http_client
+    bt esp-tls mbedtls esp_app_format esp_http_client esp_http_server
     noise_core minimp3
     esp_lcd esp_adc esp_driver_i2s esp_driver_ledc esp_driver_spi esp_driver_uart esp_wifi
     esp_driver_pcnt)

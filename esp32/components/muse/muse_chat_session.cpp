@@ -61,10 +61,13 @@
 #include "freertos/queue.h"
 #include "freertos/stream_buffer.h"
 #include "freertos/task.h"
+#include "lwip/netdb.h"
 #include "lwip/sockets.h"
 
 extern "C" {
 #include "cJSON.h"
+#include "esp_crt_bundle.h"
+#include "esp_http_client.h"
 #include "minimp3.h"
 #include "muse_account_api.h"
 #include "muse_link.h"
@@ -72,6 +75,9 @@ extern "C" {
 #include "muse_wifi.h"
 }
 #include "muse_chat_priv.h"
+#if CONFIG_MUSE_STACKCHAN_HEAD
+#include "muse_head.h"
+#endif
 
 #include <xplat/noise/core/ClientSession.h>
 #include <xplat/noise/core/PsaCryptoBackend.h>
@@ -110,9 +116,9 @@ static const char *TAG = "muse_chat_session";
 #define AUTO_RETRY_MAX_US (120 * 1000000LL)
 #define FINAL_TIMEOUT_US (15 * 1000000LL)  /* release -> final transcript */
 #define REPLY_TIMEOUT_US (60 * 1000000LL)  /* chat posted -> first assistant message */
-#define TURN_CAP_US (180 * 1000000LL)
+#define TURN_CAP_US (15 * 60 * 1000000LL)  /* long jobs: Muse can work for minutes and the answer is still spoken */
 #define SETTLE_US (3 * 1000000LL)          /* quiet period that ends a turn */
-#define BUSY_HOLD_US (20 * 1000000LL)      /* how long a busy agent keeps it open */
+#define BUSY_HOLD_US (5 * 60 * 1000000LL)  /* how long a busy agent keeps it open */
 #define TEXT_REPLY_TIMEOUT_US (5 * 60 * 1000000LL)   /* typed turns: agents can work a while */
 #define TEXT_TURN_CAP_US (15 * 60 * 1000000LL)
 #define TEXT_BUSY_HOLD_US (5 * 60 * 1000000LL)
@@ -129,7 +135,7 @@ static const char *TAG = "muse_chat_session";
 
 /* ---- Voice task <-> session task ---- */
 
-enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE };
+enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_TRANSCRIPT };
 
 struct cmd_t {
     cmd_type_t type;
@@ -1501,6 +1507,99 @@ static void on_chat_ack(stream_t *s)
 
 /* ---- Turn: speech ---- */
 
+static void tts_data(const uint8_t *data, size_t len);
+
+static const char EL_KEY[] = CONFIG_MUSE_ELEVENLABS_API_KEY;
+static char s_el_err[64];   /* why the last eleven_fetch failed; shown in the caption */
+
+/* Speaks `text` with ElevenLabs: fetches the whole MP3 (22 kHz, 32 kbps, so
+ * MP3_BUF holds minutes) into tts_data(). Blocks this task for the request;
+ * the Noise connection tolerates seconds (DEAD_US). False on any failure, and
+ * the caller falls back to silent captions.
+ * ponytail: whole-reply fetch, speech starts after generation finishes;
+ * stream the body through decode() for a faster first word. */
+/* One request. *retry is set when trying again could help: ElevenLabs busy (429, 5xx) or the connection dropped. */
+static bool eleven_attempt(const char *url, const char *body, bool *retry)
+{
+    *retry = false;
+    esp_http_client_config_t cfg = {};
+    cfg.url = url;
+    cfg.method = HTTP_METHOD_POST;
+    cfg.timeout_ms = 12000;
+    cfg.crt_bundle_attach = esp_crt_bundle_attach;
+    esp_http_client_handle_t h = esp_http_client_init(&cfg);
+    if (!h) {
+        return false;
+    }
+    bool ok = false;
+    int blen = (int)strlen(body);
+    s_turn.mp3_len = 0;
+    esp_http_client_set_header(h, "xi-api-key", EL_KEY);
+    esp_http_client_set_header(h, "Content-Type", "application/json");
+    esp_err_t oe = esp_http_client_open(h, blen);
+    int wn = oe == ESP_OK ? esp_http_client_write(h, body, blen) : -1;
+    int64_t hl = wn == blen ? esp_http_client_fetch_headers(h) : -1;
+    if (oe == ESP_OK && wn == blen && hl >= 0) {
+        int status = esp_http_client_get_status_code(h);
+        if (status == 200) {
+            static uint8_t buf[1024];
+            int n;
+            while ((n = esp_http_client_read(h, (char *)buf, sizeof(buf))) > 0) {
+                tts_data(buf, (size_t)n);
+            }
+            ok = s_turn.mp3_len > 0;
+            if (!ok) snprintf(s_el_err, sizeof(s_el_err), "empty audio");
+            *retry = !ok;
+        } else {
+            snprintf(s_el_err, sizeof(s_el_err), "HTTP %d", status);
+            ESP_LOGW(TAG, "ElevenLabs HTTP %d", status);
+            *retry = status == 429 || status >= 500;
+        }
+    } else {
+        int tc = 0, tf = 0;
+        esp_http_client_get_and_clear_last_tls_error(h, &tc, &tf);
+        snprintf(s_el_err, sizeof(s_el_err), "conn tls%x e%d", tc, esp_http_client_get_errno(h));
+        ESP_LOGW(TAG, "ElevenLabs request failed: %s", s_el_err);
+        *retry = true;
+    }
+    esp_http_client_cleanup(h);
+    return ok;
+}
+
+static bool eleven_fetch(const char *text)
+{
+    s_el_err[0] = 0;
+    if (sizeof(EL_KEY) <= 1 || !text[0]) {
+        return false;
+    }
+    cJSON *j = cJSON_CreateObject();
+    cJSON_AddStringToObject(j, "text", text);
+    cJSON_AddStringToObject(j, "model_id", CONFIG_MUSE_ELEVENLABS_MODEL);
+    char *body = cJSON_PrintUnformatted(j);
+    cJSON_Delete(j);
+    if (!body) {
+        return false;
+    }
+    char url[192];
+    snprintf(url, sizeof(url), "https://api.elevenlabs.io/v1/text-to-speech/%s?output_format=mp3_22050_32",
+             CONFIG_MUSE_ELEVENLABS_VOICE_ID);
+    /* ElevenLabs answers 429 when it's busy; a short wait and another go usually gets through.
+     * Three tries at most: this task also keeps the Muse connection alive (DEAD_US). */
+    bool ok = false, retry = false;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+        ok = eleven_attempt(url, body, &retry);
+        if (ok || !retry) {
+            break;
+        }
+        ESP_LOGW(TAG, "ElevenLabs try %d failed, %s", attempt, attempt < 3 ? "retrying" : "giving up");
+        if (attempt < 3) {
+            vTaskDelay(pdMS_TO_TICKS(1500 * attempt));
+        }
+    }
+    free(body);
+    return ok;
+}
+
 static void start_tts(void)
 {
     if (s_turn.tts_msg >= 0) {
@@ -1527,6 +1626,25 @@ static void start_tts(void)
          * and finishes the message once it's drained.
          */
         m.pcm_start = s_turn.pcm_out;
+#if CONFIG_MUSE_STACKCHAN_HEAD
+        muse_head_gesture(s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr);
+#endif
+        s_turn.mp3_len = 0;
+        s_turn.mp3_ended = false;
+        s_turn.kbps = 0;
+        s_turn.down_rate = 0;
+        mp3dec_init(&s_turn.dec);
+        if (s_turn.texts && eleven_fetch(s_turn.texts + i * TEXT_MAX)) {
+            m.pcm_frames = 0;
+            m.tts = TTS_ACTIVE;
+            s_turn.tts_msg = i;
+            s_turn.silent = false;
+            s_turn.mp3_ended = true;
+            ESP_LOGI(TAG, "speaking message %s (%u chars)", m.id, (unsigned)m.len);
+            show_reply_start(m);
+            return;
+        }
+        s_turn.mp3_len = 0;
         m.pcm_frames = (uint32_t)(m.len * MIC_RATE / TEXT_CHARS_PER_S);
         m.tts = TTS_ACTIVE;
         s_turn.tts_msg = i;
@@ -1935,6 +2053,16 @@ static void handle(const cmd_t &cmd)
         break;
     case CMD_WAKE:   /* only ends hatch_task's resting wait */
         break;
+    case CMD_TRANSCRIPT:
+        if (cmd.gen == s_gen.load() && turn_start(cmd.gen, false)) {
+            char msg[1100];
+            snprintf(msg, sizeof(msg), "[StackChan] %s", cmd.text);
+            ESP_LOGI(TAG, "heard: \"%s\"", cmd.text);
+            emit(MUSE_HATCH_EV_HEARD, cmd.text);
+            send_chat(msg, "text");
+        }
+        free(cmd.text);
+        break;
     }
 }
 
@@ -2136,6 +2264,21 @@ extern "C" void muse_hatch_text_turn(char *text)
     } else if (xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(1000)) != pdTRUE) {
         muse_hatch_console("error", "BUSY", nullptr);
         free(text);
+    }
+}
+
+extern "C" void muse_hatch_turn_transcript(const char *text)
+{
+    char *copy = text ? strdup(text) : nullptr;
+    if (!copy) {
+        return;
+    }
+    uint32_t gen = ++s_gen;
+    xStreamBufferReset(s_in);
+    drain_out();
+    cmd_t cmd{ CMD_TRANSCRIPT, gen, copy };
+    if (!s_cmds || xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        free(copy);
     }
 }
 
