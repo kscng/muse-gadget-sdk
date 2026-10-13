@@ -21,7 +21,7 @@ Tested on one StackChan with Muse. Flashing custom firmware can brick a board; t
 | **Head movement** | Servos follow the avatar: idle glances, a sway while thinking, nods while speaking, a shake on errors, a wiggle with the hearts. Still while you hold PWR and while the screen sleeps. |
 | **Reply tone** | The first sentence of a reply picks a gesture: a question tilts, yes nods, no shakes, cheer bounces (English and Cantonese). |
 | **Petting** | The head touch strip wakes the screen, shows the hearts, and a long hold purrs. |
-| **Camera** | One photo on request: the Muse command `camera.capture`, and `GET /photo` over Wi-Fi. A two-note beep warns that a photo is coming and a camera click marks the shot. Nothing streams or is stored. |
+| **Camera** | One photo on request: the Muse command `camera.capture`, and `GET /photo` over Wi-Fi (full picture, for checking what it sees). A two-note beep warns that a photo is coming and a camera click marks the shot. For Muse, the photo is posted into the chat as an attached file (`stackchan_photo.jpg`), because Muse can open files but can't use a long block of base64 text from a tool result; the StackChan keeps the turn open to speak Muse's description. Nothing streams, and nothing is stored on the device. |
 | **Wi-Fi trigger** | A small HTTP server (token required): `POST /talk`, `/talk/down`, `/talk/up`, `GET /photo`, `GET /status`. |
 | **IR remote (experimental)** | Muse commands `ir.learn`, `ir.send`, `ir.list`. Untested end to end: the receiver saw no signal on the author's unit. |
 | **Long jobs** | A voice turn waits up to 15 minutes while Muse is still working, then speaks the answer. |
@@ -89,5 +89,6 @@ Servo, expander, touch and IR details come from M5Stack's [StackChan-BSP](https:
   reach the device until it wakes.
 - **Not included:** the avatar. Your Muse draws it with `tools/muse/avatar.py`; the SDK ignores the result
   (`components/muse/avatar/`), and so does this fork.
+- **Photos in your chat:** every photo Muse takes stays in your Muse chat history as a file.
 - **Known issues:** camera photos can show a torn horizontal band (the DMA buffer had to be shrunk); photos are dark
-  in a dark room; the IR receiver did not work on the author's unit.
+  in a dark room; the IR receiver did not work on the author's unit; the spoken description of a photo asked for by voice is built but was only tested through typed chat.

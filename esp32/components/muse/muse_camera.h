@@ -12,11 +12,8 @@
 extern "C" {
 #endif
 
-/* A JPEG, malloc'd (free() it). NULL with *why set on failure. */
+/* A 640x480 JPEG, malloc'd (free() it). NULL with *why set on failure. */
 uint8_t *muse_camera_capture_jpeg(size_t *len, const char **why);
-
-/* The same photo as base64, for a command result. NULL with *why set on failure. */
-char *muse_camera_capture_base64(const char **why);
 
 #ifdef __cplusplus
 }

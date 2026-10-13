@@ -79,6 +79,7 @@
 #endif
 #if CONFIG_MUSE_CORES3_CAMERA
 #include "muse_camera.h"
+#include "muse_chat.h"
 #endif
 #if CONFIG_MUSE_ENABLED
 #include "muse_glue.h"
@@ -1577,16 +1578,33 @@ static void watcher_camera_capture_task(void *arg) {
     const char *error = NULL;
     cJSON *result = cJSON_CreateObject();
 #if CONFIG_MUSE_CORES3_CAMERA
-    image = muse_camera_capture_base64(&error);
-    bool ok = image != NULL;
+    /* Muse can't take thousands of base64 characters from a tool result and open them as a picture, but it opens
+     * files. So the photo goes into the chat as an attached file, and the result says so. */
+    size_t jpeg_len = 0;
+    uint8_t *jpeg = muse_camera_capture_jpeg(&jpeg_len, &error);
+    bool ok = jpeg != NULL;
+    if (ok && !muse_hatch_post_photo(jpeg, jpeg_len)) {
+        ok = false;
+        error = "the photo couldn't be sent to the chat";
+    }
+    free(jpeg);
 #else
     bool ok = watcher_camera_capture(&image, &error);
 #endif
     cJSON_AddBoolToObject(result, "ok", ok);
     if (ok) {
         cJSON *payload = cJSON_AddObjectToObject(result, "payload");
+#if CONFIG_MUSE_CORES3_CAMERA
+        cJSON_AddStringToObject(payload, "format", "jpeg-file-in-chat");
+        cJSON_AddStringToObject(payload, "file", "stackchan_photo.jpg");
+        cJSON_AddStringToObject(payload, "note",
+                                "The photo was posted to this chat as the file stackchan_photo.jpg, in your files "
+                                "folder (the newest stackchan_photo*.jpg); it can take a few seconds to appear. Open "
+                                "that file to see the picture. The photo message also follows as a new chat message.");
+#else
         cJSON_AddStringToObject(payload, "format", "jpeg-base64");
         cJSON_AddStringToObject(payload, "data_base64", image);
+#endif
     } else {
         cJSON *failure = cJSON_AddObjectToObject(result, "error");
         cJSON_AddStringToObject(failure, "code", "camera_capture_failed");

@@ -74,6 +74,7 @@ extern "C" {
 #include "muse_settings.h"
 #include "muse_wifi.h"
 }
+#include "mbedtls/base64.h"
 #include "muse_chat_priv.h"
 #if CONFIG_MUSE_STACKCHAN_HEAD
 #include "muse_head.h"
@@ -98,6 +99,7 @@ static const char *TAG = "muse_chat_session";
 #define SCRATCH (64 * 1024)                /* inbound frames reassemble up to this */
 #define NDJSON_LINE_MAX (16 * 1024)               /* one NDJSON line / the chat ack */
 #define SUB_LINE_MAX (256 * 1024)          /* an event line grows its buffer up to this */
+#define PHOTO_WAIT_US (45 * 1000000LL)      /* how long a turn waits for Muse to describe a photo it was sent */
 #define CHAT_PART (16 * 1024)              /* one body chunk of a long typed message */
 #define MP3_BUF (512 * 1024)
 #define MP3_HOLD (1441 + 4)               /* the largest MP3 frame and the next header */
@@ -136,7 +138,7 @@ static const char *TAG = "muse_chat_session";
 
 /* ---- Voice task <-> session task ---- */
 
-enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_TRANSCRIPT };
+enum cmd_type_t : uint8_t { CMD_CONNECT, CMD_FORGET, CMD_BEGIN, CMD_END, CMD_CANCEL, CMD_TEXT, CMD_TEXT_CANCEL, CMD_WAKE, CMD_TRANSCRIPT, CMD_PHOTO };
 
 struct cmd_t {
     cmd_type_t type;
@@ -179,7 +181,7 @@ static int64_t s_auto_backoff_us = AUTO_RETRY_MIN_US;
 
 /* ---- Streams on the connection ---- */
 
-enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS };
+enum kind_t : uint8_t { K_NONE, K_SUB, K_DICT, K_CHAT, K_TTS, K_PHOTO };
 
 struct stream_t {
     int64_t id;
@@ -240,6 +242,10 @@ struct turn_t {
     char committed[512];     /* finals that arrived before the half-close */
     char partial[512];
     char user_ids[2][80];
+    char photo_ids[3][80];   /* photos the StackChan posted during this turn; Muse's replies to them are ours too */
+    int nphotos;
+    int64_t photo_wait_until_us;   /* keep the turn open until Muse has answered about the photo, or this passes */
+    bool photo_replied;
     muse_chat_rejected_t rejected;
     msg_t msgs[MAX_MSGS];
     int nmsgs;
@@ -1298,9 +1304,19 @@ static int find_msg(const char *id)
     return -1;
 }
 
+static bool is_photo_id(const char *id)
+{
+    for (int k = 0; k < s_turn.nphotos; k++) {
+        if (id && id[0] && !strcmp(id, s_turn.photo_ids[k])) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool is_user_id(const char *id)
 {
-    return id && id[0] && (!strcmp(id, s_turn.user_ids[0]) || !strcmp(id, s_turn.user_ids[1]));
+    return is_photo_id(id) || (id && id[0] && (!strcmp(id, s_turn.user_ids[0]) || !strcmp(id, s_turn.user_ids[1])));
 }
 
 /* The message `id` if it belongs to this turn, binding it on first sight; else -1. */
@@ -1316,6 +1332,9 @@ static int bind_msg(const char *id, cJSON *payload)
     const char *parent = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "reply_to_message_id"));
     if (!parent) {
         parent = cJSON_GetStringValue(cJSON_GetObjectItem(payload, "parent_message_id"));
+    }
+    if (is_photo_id(parent)) {
+        s_turn.photo_replied = true;
     }
     /* Once the ack names our message, replies to anything else are someone else's. */
     if (parent && parent[0] && s_turn.acked && !is_user_id(parent) && find_msg(parent) < 0) {
@@ -1528,6 +1547,43 @@ static void on_chat_ack(stream_t *s)
     ESP_LOGI(TAG, "chat/stream ack: user message %s", s_turn.user_ids[0]);
     cJSON_Delete(root);
     emit(MUSE_HATCH_EV_SENT, nullptr);
+}
+
+/* The ack to a photo post names the new chat message; Muse's reply to it belongs to the turn that asked for it. */
+static void on_photo_ack(stream_t *s)
+{
+    s->line[s->len] = '\0';
+    cJSON *root = cJSON_Parse(s->line);
+    cJSON *result = cJSON_GetObjectItem(root, "result");
+    cJSON *obj = cJSON_IsObject(result) ? result : root;
+    const char *id = cJSON_GetStringValue(cJSON_GetObjectItem(obj, "message_id"));
+    if (id && s_turn.phase != P_IDLE && !s_turn.text && s_turn.nphotos < 3) {
+        strlcpy(s_turn.photo_ids[s_turn.nphotos++], id, sizeof(s_turn.photo_ids[0]));
+        s_turn.photo_wait_until_us = now_us() + PHOTO_WAIT_US;
+        ESP_LOGI(TAG, "photo posted as message %s", id);
+    } else {
+        ESP_LOGI(TAG, "photo posted%s", id ? "" : " (no message id in the ack)");
+    }
+    cJSON_Delete(root);
+}
+
+/* Posts the JSON body (a chat message with the photo attached as a file) as a new chat message. Takes `json`. */
+static void post_photo(char *json)
+{
+    size_t len = strlen(json);
+    bool whole = len <= CHAT_PART;
+    int64_t id = s_connected ? open_stream(K_PHOTO, "POST", "/chat/stream", "application/json", nullptr,
+                                           whole ? json : nullptr, whole) : 0;
+    bool ok = id != 0;
+    for (size_t off = 0; ok && !whole && off < len; off += CHAT_PART) {
+        size_t n = len - off < CHAT_PART ? len - off : CHAT_PART;
+        ok = send_body(id, reinterpret_cast<const uint8_t *>(json) + off, n, off + n == len);
+    }
+    if (!ok) {
+        ESP_LOGW(TAG, "couldn't post the photo");
+        send_reset(id);
+    }
+    free(json);
 }
 
 /* ---- Turn: speech ---- */
@@ -1843,6 +1899,9 @@ static void check_turn(void)
             return;
         }
     }
+    if (s_turn.nphotos && !s_turn.photo_replied && t < s_turn.photo_wait_until_us) {
+        return;   /* a photo is with Muse: its description is still to come */
+    }
     if (t - s_turn.last_event_us < SETTLE_US) {
         return;
     }
@@ -1907,6 +1966,7 @@ static void stream_data(stream_t *s, ConstByteSpan data)
     case K_DICT:
         feed_lines(s, data.data(), data.size(), on_dictation_line);
         break;
+    case K_PHOTO:
     case K_CHAT: {
         size_t take = data.size() < s->cap - 1 - s->len ? data.size() : s->cap - 1 - s->len;
         memcpy(s->line + s->len, data.data(), take);
@@ -1943,6 +2003,14 @@ static bool stream_end(stream_t *s, bool ok)
         if (!ok) {
             turn_fail("MUSE DIDN'T TAKE IT");
         }
+        break;
+    case K_PHOTO:
+        if (ok) {
+            on_photo_ack(s);
+        } else {
+            ESP_LOGW(TAG, "photo post failed");
+        }
+        close_stream(s);
         break;
     case K_TTS:
         tts_end(s, ok);
@@ -2096,6 +2164,9 @@ static void handle(const cmd_t &cmd)
         }
         break;
     case CMD_WAKE:   /* only ends hatch_task's resting wait */
+        break;
+    case CMD_PHOTO:
+        post_photo(cmd.text);   /* takes the body */
         break;
     case CMD_TRANSCRIPT:
         if (cmd.gen == s_gen.load() && turn_start(cmd.gen, false)) {
@@ -2324,6 +2395,33 @@ extern "C" void muse_hatch_turn_transcript(const char *text)
     if (!s_cmds || xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(1000)) != pdTRUE) {
         free(copy);
     }
+}
+
+extern "C" bool muse_hatch_post_photo(const uint8_t *jpeg, size_t len)
+{
+    static const char HEAD[] = "{\"message\":\"[StackChan] Here is the photo you asked me to take (stackchan_photo.jpg). "
+                               "Look at it and answer what you were asked.\",\"output_modality\":\"text\",\"items\":[{\"type\":\"file\","
+                               "\"mime_type\":\"image/jpeg\",\"filename\":\"stackchan_photo.jpg\",\"data_base64\":\"";
+    static const char TAIL[] = "\"}]}";
+    size_t cap = sizeof(HEAD) + (len + 2) / 3 * 4 + sizeof(TAIL);
+    char *json = static_cast<char *>(heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!json || !s_cmds || !muse_hatch_configured()) {
+        free(json);
+        return false;
+    }
+    size_t out = 0;
+    memcpy(json, HEAD, sizeof(HEAD) - 1);
+    if (mbedtls_base64_encode(reinterpret_cast<unsigned char *>(json) + sizeof(HEAD) - 1, cap - sizeof(HEAD), &out, jpeg, len) != 0) {
+        free(json);
+        return false;
+    }
+    memcpy(json + sizeof(HEAD) - 1 + out, TAIL, sizeof(TAIL));
+    cmd_t cmd{ CMD_PHOTO, 0, json };
+    if (xQueueSend(s_cmds, &cmd, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        free(json);
+        return false;
+    }
+    return true;
 }
 
 extern "C" void muse_hatch_text_cancel(void)

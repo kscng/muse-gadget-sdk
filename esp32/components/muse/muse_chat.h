@@ -135,6 +135,10 @@ void muse_hatch_text_turn(char *text);
 /* Starts a voice turn from text you already have (a transcript): posts it to the chat as "[StackChan] <text>" and
  * waits for the reply as for any push-to-talk turn. Copies `text`. */
 void muse_hatch_turn_transcript(const char *text);
+
+/* Posts a JPEG to the chat as a new message with the photo attached as a file (stackchan_photo.jpg), so Muse can open
+ * and look at it. Replies to it count as part of the current turn and are spoken. False if it couldn't be queued. */
+bool muse_hatch_post_photo(const uint8_t *jpeg, size_t len);
 void muse_hatch_text_cancel(void);
 
 /*

@@ -1439,9 +1439,11 @@ static char *build_register_json(void) {
 #if CONFIG_MUSE_WATCHER_CAMERA || CONFIG_MUSE_CORES3_CAMERA
     add_command(commands, "camera.capture",
 #if CONFIG_MUSE_CORES3_CAMERA
-                "Take one still JPEG photo with the StackChan's camera, which looks where its head points. "
-                "Low resolution and fixed focus, best in good light. "
-                "The photo is returned as base64 only when this command is explicitly invoked.",
+                "Take one still photo with the StackChan's camera, which looks where its head points. "
+                "Low resolution and fixed focus, best in good light. The photo is not in this result: it is posted "
+                "to the chat as a file named stackchan_photo.jpg (the newest stackchan_photo*.jpg in your files "
+                "folder, a few seconds later), and you open that file to look at it. Only taken when this "
+                "command is explicitly invoked.",
 #else
                 "Capture one still JPEG frame from the SenseCAP Watcher camera. "
                 "The frame is returned as base64 only when this command is explicitly invoked.",

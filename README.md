@@ -23,8 +23,9 @@ described below, and in detail in [stackchan/README.md](stackchan/README.md). I 
   reply: a question tilts, "yes" nods, "no" shakes, good news bounces. Petting the top of its head makes it purr.
 - **It has moods.** Muse starts each reply with an emotion tag (excited, sad, curious, laughs, sighs and so on).
   The voice is spoken that way, the tag stays off the screen, and the head matches: bounce, shake, droop or tilt.
-- **It can see.** One photo on request, either from my Mac or when Muse asks for it. Nothing streams and nothing is
-  stored.
+- **It can see.** One photo on request, from my Mac or when I ask Muse. A beep warns me and a click marks the shot.
+  Muse gets the photo as a file in the chat (a long block of text it couldn't use), then describes it. Nothing
+  streams, and nothing is stored on the StackChan.
 - **Wi-Fi control.** A small token-protected server lets a Mac trigger listening or take a photo, with clickable
   apps and a shell command.
 - **Slow jobs.** If Muse is still working on a long task, the StackChan waits (up to 15 minutes) and speaks the

@@ -23,7 +23,6 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "linux/videodev2.h"
-#include "mbedtls/base64.h"
 
 static const char *TAG = "camera";
 
@@ -201,22 +200,4 @@ uint8_t *muse_camera_capture_jpeg(size_t *len, const char **why)
     uint8_t *jpeg = capture(len, why);
     atomic_store(&s_busy, false);
     return jpeg;
-}
-
-char *muse_camera_capture_base64(const char **why)
-{
-    size_t len;
-    uint8_t *jpeg = muse_camera_capture_jpeg(&len, why);
-    if (!jpeg) return NULL;
-    size_t cap = (len + 2) / 3 * 4 + 1, out = 0;
-    char *b64 = heap_caps_malloc(cap, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!b64 || mbedtls_base64_encode((unsigned char *)b64, cap, &out, jpeg, len) != 0) {
-        free(b64);
-        free(jpeg);
-        if (why) *why = "out of memory for the photo";
-        return NULL;
-    }
-    b64[out] = 0;
-    free(jpeg);
-    return b64;
 }
