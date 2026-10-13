@@ -91,4 +91,4 @@ Servo, expander, touch and IR details come from M5Stack's [StackChan-BSP](https:
   (`components/muse/avatar/`), and so does this fork.
 - **Photos in your chat:** every photo Muse takes stays in your Muse chat history as a file.
 - **Known issues:** camera photos can show a torn horizontal band (the DMA buffer had to be shrunk); photos are dark
-  in a dark room; the IR receiver did not work on the author's unit; the spoken description of a photo asked for by voice is built but was only tested through typed chat.
+  in a dark room; the IR receiver did not work on the author's unit.
