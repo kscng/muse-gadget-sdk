@@ -1,72 +1,66 @@
-<!--
-Copyright (c) Meta Platforms, Inc. and affiliates.
+# StackChan × Muse
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+I turned an [M5Stack StackChan](https://docs.m5stack.com/en/StackChan) (a CoreS3 on a small robot body with
+two servos) into a desk companion for [Muse](https://developer.meta.com/ai/lp/muse-code/), by building on Meta's
+open-source [Muse Gadget SDK](https://github.com/facebookincubator/muse-gadget-sdk). It listens, answers out loud in
+Cantonese or English, and moves its head while it does.
 
-    http://www.apache.org/licenses/LICENSE-2.0
+This is a fork. The original SDK README is kept as [README.upstream.md](README.upstream.md). What I added is
+described below, and in detail in [stackchan/README.md](stackchan/README.md). I built it together with
+[Claude Code](https://claude.com/claude-code), testing each step on the real device.
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
--->
+## What I built
 
-# Muse Gadgets
+- **It talks.** Muse's replies are spoken through ElevenLabs (`eleven_v4_turbo`), in English and Cantonese. The SDK
+  only showed text.
+- **It understands Cantonese, English and a mix.** Muse's own speech recognition kept guessing Vietnamese or
+  Japanese for my Cantonese, so I added ElevenLabs Scribe with a Cantonese language hint. English words inside a
+  Cantonese sentence come through correctly. A software boost helps quiet speech.
+- **Hands-free.** Hold your hand near the screen, or click an app on my Mac, and it wakes, beeps and listens.
+  It stops about a second and a half after I stop talking, judged against the room's own noise, so a fan doesn't
+  fool it.
+- **It moves.** The head glances around, sways while thinking, nods while speaking, and its gesture follows the
+  reply: a question tilts, "yes" nods, "no" shakes, good news bounces. Petting the top of its head makes it purr.
+- **It can see.** One photo on request, either from my Mac or when Muse asks for it. Nothing streams and nothing is
+  stored.
+- **Wi-Fi control.** A small token-protected server lets a Mac trigger listening or take a photo, with clickable
+  apps and a shell command.
+- **Slow jobs.** If Muse is still working on a long task, the StackChan waits (up to 15 minutes) and speaks the
+  answer when it arrives.
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/images/muse-gadgets-dark.png">
-    <img src=".github/images/muse-gadgets-light.png" width="900" alt="Muse gadgets: a Waveshare round AMOLED, an M5Stack StickS3, Muse Home Link, a Raspberry Pi and a Seeed reTerminal e-ink display">
-  </picture>
-</p>
+```
+you speak ─▶ microphone (+boost) ─▶ ElevenLabs Scribe ─▶ "[StackChan] 你好…" ─▶ Muse
+                                                                                   │
+speaker ◀─ ElevenLabs voice ◀─ reply text ◀────────────────────────────────────────┘
+head gestures ◀─ reply tone          camera ◀─ Muse asks for a photo
+```
 
-Muse gadgets are open source devices you build yourself. Program an
-off-the-shelf ESP32 board or set up a Raspberry Pi with our device SDKs, then
-connect Muse to your displays, buttons, sensors, actuators, and whatever else
-you've got lying on your workbench.
+## What didn't work
 
-We open sourced the SDKs and firmware here. It's built by hackers, for hackers,
-just for fun. Side effects of tinkering may include bricked boards, voided
-warranties, brownouts, or bankruptcies. Proceed at your own risk!
+- The 12 LEDs on the body stayed dark, although the chip accepted every command and M5Stack's own start-up sequence
+  is identical, so I removed that code.
+- The infrared receiver never saw my remote, so learning an air-conditioner remote is unfinished (the code is
+  there, marked experimental).
+- Photos can show a torn band across the picture, and are dark in a dark room.
 
-| | |
-|---|---|
-| [**ESP32 Device SDK**](esp32) | Connect your ESP32 board to Muse through our open source SDK. Throw in a screen to show images, add audio in and out, or wire up other sensors. |
-| [**Linux Device SDK**](linux) | Turn that spare Raspberry Pi or Linux box into a Muse gadget. Hack in your own commands to let Muse handle sysadmin chores or your Home Assistant setup. |
+## Things I learned the hard way
 
-Before you flash or pair a gadget, get an
-[SDK token](https://gadgets.muse.ai/settings/sdk-tokens) and review the
-[Gadget SDK Terms](https://gadgets.muse.ai/sdk-terms). Every gadget needs a
-token to pair.
+- ElevenLabs' certificate chain ends at the old GlobalSign root, which ESP-IDF's built-in list lacks, so HTTPS
+  failed until I added that root (it expires in January 2028).
+- The microphone gain was already at the chip's maximum, so "more sensitive" had to be done in software.
+- A fixed "is this speech?" level fails in a room with a fan; it has to be relative to the room's noise.
+- M5Stack's camera needs its sensor driver switched on and a smaller DMA buffer to fit in memory here.
 
-ESP32 and Linux gadgets pair with the Muse app on iOS and Android, via
-Settings > Devices. Turn on Developer mode there first, then look for devices
-prefixed with "MuseGadget".
-Each directory has a `README.md` to get started and an `AGENTS.md` for coding
-agents like [Muse Code](https://developer.meta.com/ai/lp/muse-code/).
+## Try it
 
-## Community
+You need a StackChan, a [Muse SDK token](https://gadgets.muse.ai/settings/sdk-tokens), and optionally an ElevenLabs
+key. Setup, every setting and the file list are in [stackchan/README.md](stackchan/README.md). Flashing custom
+firmware can brick a board, so back up the original first. The servo home positions are per unit: read yours from
+your own backup (the guide says how).
 
-Meet other hackers who are building and customizing Muse gadgets in our
-community [Discord](https://discord.gg/3bhjCkZdd6). Get inspired, support each
-other, and share what you make.
+## Credits and licence
 
-## License
-
-Muse Gadgets is licensed under the Apache License, Version 2.0, found in
-[`LICENSE`](LICENSE), except for these third-party files, which keep their
-upstream licenses:
-
-| Path | Upstream | License |
-|---|---|---|
-| [`esp32/components/minimp3/include/minimp3.h`](esp32/components/minimp3) | [lieff/minimp3](https://github.com/lieff/minimp3) | CC0-1.0, see [`LICENSE`](esp32/components/minimp3/LICENSE) |
-| [`esp32/main/pixel_font.c`](esp32/main/pixel_font.c) | Adafruit GFX `glcdfont.c` | BSD-2-Clause, in the file header |
-
-Dependencies fetched at build time are under their own licenses: ESP-IDF
-components (into `esp32/managed_components/`), and the simulator's LVGL and
-SDL (listed in [`esp32/simulator/THIRD_PARTY.md`](esp32/simulator/THIRD_PARTY.md)).
-
-The Apache License does not cover the [Jollybot avatar](esp32/avatar).
+Meta's Muse Gadget SDK (Apache-2.0), M5Stack's [StackChan-BSP](https://github.com/m5stack/StackChan-BSP) (MIT, used
+as a reference for the hardware), Espressif's ESP-IDF, and ElevenLabs for voice and transcription. My additions
+follow the SDK's Apache-2.0 licence. The avatar is not included: your Muse draws its own, and mine is a third-party
+character.
