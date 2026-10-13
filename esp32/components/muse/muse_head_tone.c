@@ -65,3 +65,49 @@ uint8_t muse_head_tone(const char *text)
     return cheer ? G_BOUNCE : G_NONE;
 }
 
+/* Muse's own emotion tags (ElevenLabs audio tags). Order matters: it is the index used elsewhere. */
+static const struct {
+    const char *name;
+    uint8_t gesture;
+} EMOTIONS[MUSE_EMOTIONS] = {
+    { "", G_NONE },
+    { "excited", G_BOUNCE },     { "playful", G_BOUNCE },   { "peaceful", G_NONE },   { "amazed", G_BOUNCE },
+    { "anxious", G_SHAKE },      { "frustrated", G_SHAKE }, { "scared", G_SHAKE },    { "tired", G_DROOP },
+    { "curious", G_TILT },       { "angry", G_SHAKE },      { "sad", G_DROOP },       { "laughs", G_BOUNCE },
+    { "crying", G_DROOP },       { "sighs", G_DROOP },      { "mischievously", G_TILT },
+};
+/* "clears throat" is also accepted: it speaks as a tag but doesn't move the head. */
+#define CLEARS_THROAT_IDX MUSE_EMOTIONS   /* one past the table */
+
+const char *muse_emotion_name(int idx)
+{
+    if (idx == CLEARS_THROAT_IDX) return "clears throat";
+    return idx > 0 && idx < MUSE_EMOTIONS ? EMOTIONS[idx].name : "";
+}
+
+uint8_t muse_emotion_gesture(int idx)
+{
+    return idx > 0 && idx < MUSE_EMOTIONS ? EMOTIONS[idx].gesture : G_NONE;
+}
+
+int muse_emotion_parse(const char *s, size_t *used)
+{
+    *used = 0;
+    if (s[0] != '[') return 0;
+    const char *close = strchr(s, ']');
+    size_t n = close ? (size_t)(close - s) - 1 : strlen(s) - 1;   /* characters between the brackets so far */
+    if (!close) return n < 16 ? -1 : 0;                            /* maybe still arriving */
+    if (n == 0 || n > 15) return 0;
+    char tag[16];
+    for (size_t i = 0; i < n; i++) tag[i] = (char)tolower((unsigned char)s[1 + i]);
+    tag[n] = 0;
+    int found = 0;
+    for (int i = 1; i <= MUSE_EMOTIONS && !found; i++) {
+        if (!strcmp(tag, muse_emotion_name(i))) found = i;
+    }
+    if (!found) return 0;
+    const char *rest = close + 1;
+    while (*rest == ' ') rest++;
+    *used = (size_t)(rest - s);
+    return found;
+}

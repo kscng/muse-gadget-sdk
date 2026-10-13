@@ -290,6 +290,16 @@ menu "Muse"
         range -40 -10
         default -26
 
+    config MUSE_ELEVENLABS_EMOTION
+        bool "Spoken replies carry an emotion from their tone"
+        depends on MUSE_STACKCHAN_HEAD
+        default n
+        help
+            The first sentence of a reply picks an ElevenLabs audio tag put in
+            front of the spoken text (not shown on the screen): [curious] for
+            a question, [excited] for cheer, [sighs] for a refusal or an
+            apology. Uses the same reading of the reply as the head gestures.
+
     config MUSE_SCRIBE_STT
         bool "Transcribe speech with ElevenLabs Scribe (instead of Muse's own)"
         depends on MUSE_HATCH

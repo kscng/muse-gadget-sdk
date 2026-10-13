@@ -21,6 +21,8 @@ described below, and in detail in [stackchan/README.md](stackchan/README.md). I 
   fool it.
 - **It moves.** The head glances around, sways while thinking, nods while speaking, and its gesture follows the
   reply: a question tilts, "yes" nods, "no" shakes, good news bounces. Petting the top of its head makes it purr.
+- **It has moods.** Muse starts each reply with an emotion tag (excited, sad, curious, laughs, sighs and so on).
+  The voice is spoken that way, the tag stays off the screen, and the head matches: bounce, shake, droop or tilt.
 - **It can see.** One photo on request, either from my Mac or when Muse asks for it. Nothing streams and nothing is
   stored.
 - **Wi-Fi control.** A small token-protected server lets a Mac trigger listening or take a photo, with clickable

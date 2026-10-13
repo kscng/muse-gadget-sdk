@@ -187,6 +187,12 @@ static void prox_probe(void)
 
 /* ---- Reading the reply's tone into a head gesture (muse_head_tone.c) ---- */
 
+void muse_head_gesture_emotion(int emotion)
+{
+    s_gesture = muse_emotion_gesture(emotion);
+    ESP_LOGI(TAG, "reply emotion [%s], gesture %u", muse_emotion_name(emotion), (unsigned)s_gesture);
+}
+
 void muse_head_gesture(const char *text)
 {
     s_gesture = text ? muse_head_tone(text) : G_NONE;
@@ -211,6 +217,9 @@ static void gesture_pose(uint8_t g, float tg, float *yaw, float *pitch)
         break;
     case G_BOUNCE:
         *pitch = 14 + 9 * fabsf(sinf(tg * 2.0f * (float)M_PI / 0.7f));
+        break;
+    case G_DROOP:   /* the head lowers and stays down */
+        *pitch = 14 - 6 * fminf(1.0f, tg / 0.6f);
         break;
     default:
         break;

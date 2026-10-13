@@ -20,6 +20,9 @@ esp_err_t muse_head_init(i2c_master_bus_handle_t bus);
  * question, a bounce for cheer) and plays it when the avatar starts speaking. */
 void muse_head_gesture(const char *text);
 
+/* The same, for a reply Muse tagged with an emotion (index as in muse_head_tone.h). */
+void muse_head_gesture_emotion(int emotion);
+
 #ifdef __cplusplus
 }
 #endif

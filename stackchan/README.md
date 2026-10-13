@@ -12,9 +12,10 @@ Tested on one StackChan with Muse. Flashing custom firmware can brick a board; t
 
 | Feature | How it works |
 |---|---|
-| **Spoken replies** | Muse's reply text goes to ElevenLabs (`eleven_v4_turbo`) and plays through the speaker. It replaces the SDK's silent captions. Retries when ElevenLabs is busy. Needs the root-certificate fix below. |
+| **Spoken replies** | Muse's reply text goes to ElevenLabs (`eleven_v4_turbo`) and plays through the speaker. It replaces the SDK's silent captions. Retries when ElevenLabs is busy. Needs the root-certificate fix below. The reply's tone adds an audio tag so it sounds curious, excited or apologetic. |
 | **Speech to text** | After you stop talking, the recording goes to ElevenLabs Scribe v2 with a Cantonese hint (`yue`; English and mixed sentences still work) and Muse gets `[StackChan] <text>`. Falls back to sending a voice note if Scribe is unreachable. About $0.22 per hour of audio. |
 | **Quiet-speech boost** | Software gain of up to +15 dB on quiet speech (the mic hardware is already at its maximum), never past clipping. |
+| **Emotions** | Muse opens a reply to the StackChan with one tag from a fixed list (`[excited] [playful] [peaceful] [amazed] [anxious] [frustrated] [scared] [tired] [curious] [angry] [sad] [laughs] [crying] [sighs] [clears throat] [mischievously]`). The tag is hidden on the screen, passed to ElevenLabs as an audio tag so the voice sounds that way, and picks a matching head gesture (bounce, shake, droop, tilt). Without a tag, the reply's tone picks one. Needs a standing instruction in Muse (below). |
 | **Hands-free listening** | A rising chirp, then recording, then a falling chirp. Stops about 1.4 s after you stop talking, judged against the room's own noise level. Started from the Wi-Fi trigger or the proximity sensor. |
 | **Hand near the screen** | The proximity sensor (LTR-553) wakes the device and starts listening. |
 | **Head movement** | Servos follow the avatar: idle glances, a sway while thinking, nods while speaking, a shake on errors, a wiggle with the hearts. Still while you hold PWR and while the screen sleeps. |
@@ -41,6 +42,8 @@ LED ring support was tried and removed: the 12 body LEDs stayed dark on the auth
    `zero_pos_1` (left-right) and `zero_pos_2` (up-down); read them from your backup and set
    `CONFIG_MUSE_STACKCHAN_YAW_ZERO` / `_PITCH_ZERO` (the defaults are one unit's).
 
+6. Tell your Muse once, in chat, what the StackChan expects. For example: *"Messages that start with [StackChan] come from my StackChan desk robot. Reply short and easy to say aloud, with no links, IDs or markdown, in the language I used. Begin each reply with exactly one emotion tag from [excited] [playful] [peaceful] [amazed] [anxious] [frustrated] [scared] [tired] [curious] [angry] [sad] [laughs] [crying] [sighs] [clears throat] [mischievously], or none for a neutral answer. Never use more than one tag or put one anywhere but the start. Don't use tags for the phone app or typed chat."* Muse is told that voice notes are Cantonese, English or a mix, which helps when a transcript looks odd.
+
 On the Mac: `stackchan/make-apps.sh` makes the clickable apps. Put the device's address in
 `~/.stackchan/stackchan-ip.txt` (it logs `remote: listening on http://...` at boot) and the `remote-token` value
 in `~/.stackchan/stackchan-remote-token.txt`. Then `stackchan.sh talk | toggle | look | status`.
@@ -55,6 +58,7 @@ in `~/.stackchan/stackchan-remote-token.txt`. Then `stackchan.sh talk | toggle |
 | `MUSE_CORES3_CAMERA` | n | Photos on request |
 | `MUSE_REMOTE`, `_TOKEN`, `_PORT` | n, empty, 8080 | Wi-Fi trigger |
 | `MUSE_ELEVENLABS_API_KEY`, `_VOICE_ID`, `_MODEL` | empty, stock voice, `eleven_v4_turbo` | Spoken replies |
+| `MUSE_ELEVENLABS_EMOTION` | n | Emotion tags on spoken replies: Muse's own leading tag, else one picked from the reply's tone |
 | `MUSE_SCRIBE_STT`, `_LANGUAGE` | n, `yue` | ElevenLabs speech to text |
 | `MUSE_MIC_BOOST`, `_MAX_DB`, `_TARGET_DB` | n, 15, -26 | Quiet-speech boost |
 | `HOMEHUB_STACKCHAN_IR`, `_IR_TX_GPIO`, `_IR_RX_GPIO`, `_IR_CARRIER_HZ` | n, 5, 10, 36700 | IR remote (Panasonic air conditioners use 36.7 kHz; most others 38 kHz) |

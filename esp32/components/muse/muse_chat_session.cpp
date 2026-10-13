@@ -77,6 +77,7 @@ extern "C" {
 #include "muse_chat_priv.h"
 #if CONFIG_MUSE_STACKCHAN_HEAD
 #include "muse_head.h"
+#include "muse_head_tone.h"
 #endif
 
 #include <xplat/noise/core/ClientSession.h>
@@ -208,6 +209,9 @@ struct msg_t {
     tts_t tts;
     uint32_t pcm_start;      /* where its speech starts in the reply audio */
     uint32_t pcm_frames;     /* how long it is; 0 until the MP3 has all arrived */
+    uint8_t emotion;         /* Muse's leading [tag], as an index (muse_head_tone.h); 0 for none */
+    bool tag_done;           /* the start of the text has been checked for a tag */
+    bool tag_pending;        /* it starts like a tag but the "]" hasn't arrived: don't caption it yet */
 };
 
 struct resampler_t {
@@ -1339,6 +1343,24 @@ static void append_text(msg_t &m, const char *text)
             full[0] = '\0';
         }
         strlcat(full, text, TEXT_MAX);
+#if CONFIG_MUSE_ELEVENLABS_EMOTION
+        if (!m.tag_done) {
+            /* A reply to the StackChan may open with one emotion tag, such as "[excited]". It is spoken as an audio
+             * tag and moves the head, but isn't shown. It can arrive in pieces, so it is checked from the start. */
+            size_t used;
+            int e = muse_emotion_parse(full, &used);
+            m.tag_pending = e < 0;
+            if (e >= 0) {
+                m.tag_done = true;
+            }
+            if (e > 0) {
+                m.emotion = (uint8_t)e;
+                memmove(full, full + used, strlen(full + used) + 1);
+                m.len = strlen(full);
+                return;   /* the tail copy below is only for boards without the full text buffer */
+            }
+        }
+#endif
     }
     m.len += add;
     size_t have = strlen(m.tail);
@@ -1360,6 +1382,9 @@ static void append_text(msg_t &m, const char *text)
  */
 static void show_reply_start(const msg_t &m)
 {
+    if (m.tag_pending) {
+        return;
+    }
     char line[EV_TEXT];
     if (s_turn.texts) {
         if (!muse_hatch_caption_at(s_turn.texts + (&m - s_turn.msgs) * TEXT_MAX, 0, line, sizeof(line))) {
@@ -1566,12 +1591,27 @@ static bool eleven_attempt(const char *url, const char *body, bool *retry)
     return ok;
 }
 
-static bool eleven_fetch(const char *text)
+static bool eleven_fetch(const char *text, int emotion)
 {
     s_el_err[0] = 0;
     if (sizeof(EL_KEY) <= 1 || !text[0]) {
         return false;
     }
+#if CONFIG_MUSE_ELEVENLABS_EMOTION
+    /* An audio tag in front of the text sets how it is spoken; the caption on screen is the plain text. Muse's own
+     * tag wins; without one, the tone of the first sentence picks a tag. */
+    static const char *const tone_tags[] = { "", "", "[sighs] ", "[curious] ", "[excited] " };   /* by G_NONE .. G_BOUNCE */
+    char tagged[TEXT_MAX + 24];
+    if (emotion > 0) {
+        snprintf(tagged, sizeof(tagged), "[%s] %s", muse_emotion_name(emotion), text);
+    } else {
+        uint8_t tone = muse_head_tone(text);
+        snprintf(tagged, sizeof(tagged), "%s%s", tone < sizeof(tone_tags) / sizeof(tone_tags[0]) ? tone_tags[tone] : "", text);
+    }
+    text = tagged;
+#else
+    (void)emotion;
+#endif
     cJSON *j = cJSON_CreateObject();
     cJSON_AddStringToObject(j, "text", text);
     cJSON_AddStringToObject(j, "model_id", CONFIG_MUSE_ELEVENLABS_MODEL);
@@ -1627,14 +1667,18 @@ static void start_tts(void)
          */
         m.pcm_start = s_turn.pcm_out;
 #if CONFIG_MUSE_STACKCHAN_HEAD
-        muse_head_gesture(s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr);
+        if (m.emotion) {
+            muse_head_gesture_emotion(m.emotion);
+        } else {
+            muse_head_gesture(s_turn.texts ? s_turn.texts + i * TEXT_MAX : nullptr);
+        }
 #endif
         s_turn.mp3_len = 0;
         s_turn.mp3_ended = false;
         s_turn.kbps = 0;
         s_turn.down_rate = 0;
         mp3dec_init(&s_turn.dec);
-        if (s_turn.texts && eleven_fetch(s_turn.texts + i * TEXT_MAX)) {
+        if (s_turn.texts && eleven_fetch(s_turn.texts + i * TEXT_MAX, m.emotion)) {
             m.pcm_frames = 0;
             m.tts = TTS_ACTIVE;
             s_turn.tts_msg = i;

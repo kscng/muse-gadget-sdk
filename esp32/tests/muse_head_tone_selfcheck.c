@@ -2,6 +2,7 @@
 // Run: cc -Wall -I components/muse tests/muse_head_tone_selfcheck.c components/muse/muse_head_tone.c -o /tmp/tone_check && /tmp/tone_check
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "muse_head_tone.h"
 
@@ -27,6 +28,20 @@ int main(void) {
     expect("冇問題，一陣就好。", G_NOD);
     expect("你想食咩？", G_TILT);
     expect("", G_NONE);
+    // Muse's emotion tags at the start of a reply
+    size_t used;
+    int e = muse_emotion_parse("[excited] Great news!", &used);
+    assert(e > 0 && used == 10 && !strcmp(muse_emotion_name(e), "excited") && muse_emotion_gesture(e) == G_BOUNCE);
+    e = muse_emotion_parse("[Sad]   I couldn't find it.", &used);
+    assert(e > 0 && used == 8 && muse_emotion_gesture(e) == G_DROOP);          // case-insensitive, spaces dropped
+    e = muse_emotion_parse("[clears throat] Ahem.", &used);
+    assert(e > 0 && !strcmp(muse_emotion_name(e), "clears throat") && muse_emotion_gesture(e) == G_NONE);
+    assert(muse_emotion_parse("[1] First point", &used) == 0 && used == 0);     // not an emotion: left alone
+    assert(muse_emotion_parse("[note] hello", &used) == 0);
+    assert(muse_emotion_parse("Hello [excited]", &used) == 0);                  // only at the very start
+    assert(muse_emotion_parse("[exci", &used) == -1);                           // still arriving
+    assert(muse_emotion_parse("[a very long bracket with no end", &used) == 0); // never going to be a tag
+    assert(muse_emotion_parse("", &used) == 0);
     puts("muse_head_tone ok");
     return 0;
 }
