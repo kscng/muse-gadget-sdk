@@ -33,6 +33,7 @@
 
 #include "muse_ble.h"
 #include "muse_board.h"
+#include "muse_input.h"
 #include "muse_chat.h"
 #include "muse_console.h"
 #include "muse_link.h"
@@ -91,7 +92,22 @@ static int s_canvas_px;     /* Muse's size on screen */
 static int s_dy;            /* full layout: offset from a 466 px tall screen */
 static lv_indev_t *s_indev;
 static lv_obj_t *s_tv;
+/* True while the face tile is the visible tile. Updated in the LVGL task;
+ * read from any task (single word, benign if briefly stale). */
+static volatile bool s_face_active = true;
 static lv_obj_t *s_face;
+
+static void tile_changed_cb(lv_event_t *e)
+{
+    lv_obj_t *tv = lv_event_get_target(e);
+    s_face_active = (lv_tileview_get_tile_active(tv) == s_face);
+}
+
+/* From any task: the face tile is the currently visible tile. */
+bool muse_ui_face_active(void)
+{
+    return s_face_active;
+}
 static lv_obj_t *s_settings;
 static lv_obj_t *s_dots[2];
 static lv_obj_t *s_wifi_icon;
@@ -433,6 +449,21 @@ static void set_mic_color(uint32_t color)
     color_mic(s_mic_icon, color);   /* legacy face icon only */
 }
 
+static void on_touch_mic(lv_event_t *e)
+{
+    switch (lv_event_get_code(e)) {
+    case LV_EVENT_PRESSED:
+        muse_input_touch_talk(true);
+        break;
+    case LV_EVENT_RELEASED:
+    case LV_EVENT_PRESS_LOST:
+        muse_input_touch_talk(false);
+        break;
+    default:
+        break;
+    }
+}
+
 /* Icons beside the physical buttons, in place of an instruction caption. */
 static void build_button_icons(lv_obj_t *face)
 {
@@ -441,6 +472,14 @@ static void build_button_icons(lv_obj_t *face)
     s_mic_icon = make_mic(face, s_tall ? 24 : s_small ? 12 : 26);
     lv_obj_align(s_mic_icon, t->align, t->x, t->y);
     set_mic_color(COLOR_DIM);
+    if (muse_board->touch_talk) {
+        lv_obj_add_flag(s_mic_icon, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(s_mic_icon, 12);
+        for (uint32_t i = 0; i < lv_obj_get_child_count(s_mic_icon); i++) {
+            lv_obj_remove_flag(lv_obj_get_child(s_mic_icon, i), LV_OBJ_FLAG_CLICKABLE);
+        }
+        lv_obj_add_event_cb(s_mic_icon, on_touch_mic, LV_EVENT_ALL, NULL);
+    }
 
     /* Without touch the aux button opens the menu rather than sleeping. A board
      * that leaves aux_hint out has no button to put an icon beside. */
@@ -624,7 +663,7 @@ static void set_answer(int which)
             lv_obj_add_flag(l->hides[i], LV_OBJ_FLAG_HIDDEN);
         }
     }
-    if (!muse_board->round) {
+    if (!muse_board->round && s_ring) {
         lv_obj_set_flag(s_ring, LV_OBJ_FLAG_HIDDEN, l != NULL);   /* the reply runs past a rectangle's ring */
     }
     if (l) {
@@ -829,10 +868,19 @@ static void build_screen(void)
         lv_obj_set_style_bg_color(s_face, lv_color_black(), 0);
         lv_obj_set_style_bg_opa(s_face, LV_OPA_COVER, 0);
         s_settings = lv_tileview_add_tile(s_tv, 1, 0, LV_DIR_LEFT);
+        lv_obj_add_event_cb(s_tv, tile_changed_cb, LV_EVENT_VALUE_CHANGED, NULL);
         face = s_face;
     }
 
-    if (!s_small) {
+    if (!s_small && muse_board->no_ring) {
+        /* A square panel: progress along the bottom edge, as the compact
+         * layout has it, rather than a circle around Muse. */
+        s_bar = lv_obj_create(face);
+        lv_obj_remove_style_all(s_bar);
+        lv_obj_set_size(s_bar, 0, 6);
+        lv_obj_set_style_bg_opa(s_bar, LV_OPA_COVER, 0);
+        lv_obj_align(s_bar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    } else if (!s_small) {
         /* Progress ring around the bezel. */
         int d = (s_w < s_h ? s_w : s_h) - 8;
         s_ring = lv_arc_create(face);
@@ -1041,6 +1089,10 @@ static void on_camera_hint_clicked(lv_event_t *e)
 static void on_any_press(lv_event_t *e)
 {
     (void)e;
+    if (muse_board->touch_talk && muse_link_state() == MUSE_LINK_CONFIRM) {
+        muse_input_touch_talk(true);
+        muse_input_touch_talk(false);
+    }
     muse_state_poke();
 }
 
@@ -1314,7 +1366,7 @@ static void update_chrome(float now)
     if (b.passkey || confirm) {
         char code[24], hint[40];
         if (confirm) {
-            if (!muse_board->audio_init) {
+            if (muse_board->touch_talk || !muse_board->audio_init) {
                 strlcpy(code, "Tap screen", sizeof(code));
                 strlcpy(hint, "Tap to confirm pairing", sizeof(hint));
             } else {

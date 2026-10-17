@@ -35,9 +35,21 @@ menu "Muse"
             bool "Waveshare ESP32-S3-Touch-AMOLED-1.75 (not the 1.75C)"
             depends on IDF_TARGET_ESP32S3
 
+        config MUSE_BOARD_OSTB_ECHOEAR_2ST
+            bool "OSTB EchoEar-2ST (360px round touch LCD, experimental)"
+            depends on IDF_TARGET_ESP32S3
+
         config MUSE_BOARD_WAVESHARE_S3_216
             bool "Waveshare ESP32-S3-Touch-AMOLED-2.16"
             depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_WAVESHARE_S3_185C
+            bool "Waveshare ESP32-S3-Touch-LCD-1.85C"
+            depends on IDF_TARGET_ESP32S3
+
+        config MUSE_BOARD_ESP_MOSAICO
+            bool "Espressif ESP-Mosaico (ESP32-S31)"
+            depends on IDF_TARGET_ESP32S31
 
         config MUSE_BOARD_AIPI
             bool "AIPI Lite (ESP32-S3, two buttons, no touch)"
@@ -92,6 +104,9 @@ menu "Muse"
         config MUSE_BOARD_WAVESHARE_S3_LCD7
             bool "Waveshare ESP32-S3-Touch-LCD-7 (800x480 touch LCD, no audio)"
             depends on IDF_TARGET_ESP32S3
+        config MUSE_BOARD_WAVESHARE_S3_LCD128
+            bool "Waveshare ESP32-S3-Touch-LCD-1.28 (240x240 round touch LCD, no audio)"
+            depends on IDF_TARGET_ESP32S3
         config MUSE_BOARD_VN_S3_183
             bool "VN ESP32-S3 board (1.83\" 284x240 NV3023 LCD, ES8311 and ES7210)"
             depends on IDF_TARGET_ESP32S3
@@ -110,7 +125,10 @@ menu "Muse"
         string
         default "waveshare_s3_175c" if MUSE_BOARD_WAVESHARE_S3_175C
         default "waveshare_s3_175" if MUSE_BOARD_WAVESHARE_S3_175
+        default "ostb_echoear_2st" if MUSE_BOARD_OSTB_ECHOEAR_2ST
         default "waveshare_s3_216" if MUSE_BOARD_WAVESHARE_S3_216
+        default "waveshare_s3_185c" if MUSE_BOARD_WAVESHARE_S3_185C
+        default "esp_mosaico" if MUSE_BOARD_ESP_MOSAICO
         default "aipi" if MUSE_BOARD_AIPI
         default "espressif_box_3" if MUSE_BOARD_ESPRESSIF_BOX_3
         default "waveshare_c6_18" if MUSE_BOARD_WAVESHARE_C6_18
@@ -125,6 +143,7 @@ menu "Muse"
         default "fnk0104b" if MUSE_BOARD_FNK0104B
         default "guition_jc3248w535" if MUSE_BOARD_GUITION_JC3248W535
         default "waveshare_s3_lcd7" if MUSE_BOARD_WAVESHARE_S3_LCD7
+        default "waveshare_s3_lcd128" if MUSE_BOARD_WAVESHARE_S3_LCD128
         default "vn_s3_183" if MUSE_BOARD_VN_S3_183
         default "ai_passport" if MUSE_BOARD_AI_PASSPORT
         default "none"
@@ -134,13 +153,28 @@ menu "Muse"
     # (the Watcher's USB-C goes to a CH342) or the chip has none.
     config MUSE_CONSOLE_UART
         bool
-        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || !SOC_USB_SERIAL_JTAG_SUPPORTED
+        default y if MUSE_BOARD_SENSECAP_WATCHER || MUSE_BOARD_WAVESHARE_S3_LCD7 || MUSE_BOARD_WAVESHARE_S3_LCD128 || !SOC_USB_SERIAL_JTAG_SUPPORTED
 
     # A board overlay can raise this for a quiet speaker.
     config MUSE_DEFAULT_VOLUME
         int "Speaker volume until one is chosen in settings (percent)"
         range 0 100
         default 70
+
+    config MUSE_POWER_TEST
+        bool "Isolated board BSP power-characterization firmware"
+        # Boards implementing boards/muse_power_test_board.h; extend this list
+        # only after the new board's diagnostic hooks and matrix pass tests.
+        depends on (MUSE_BOARD_SENSECAP_WATCHER) && PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        default n
+        help
+            DIAGNOSTIC ONLY: bypass Home Link and the Muse UI/voice application
+            at app_main. USB UART arms a timed autonomous VBUS-free BSP-load
+            sweep. No credentials, production NVS, BLE provisioning or OTA.
+            Results are retained in RAM/RTC until read back after USB reconnect.
+            This characterizes isolated BSP loads, NOT production power.
+            Optional camera support is not required and unsupported matrix
+            features are explicitly skipped. Never enable in a release profile.
 
     config MUSE_WATCHER_CAMERA
         bool "SenseCAP Watcher camera capture and live preview"
@@ -176,6 +210,21 @@ menu "Muse"
             to GPIO2), L/R to GND, power to 3.3 V, and its SD line to a free
             GPIO, and set that GPIO here. -1 leaves push-to-talk recording
             silence.
+
+    config MUSE_STATIC_BUFFERS_IN_PSRAM
+        bool "Keep the avatar's and audio's static buffers in PSRAM"
+        depends on MUSE_ENABLED && SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
+        default n
+        help
+            Places the zero-initialized statics of the avatar renderer
+            (muse_pixel.c: its frame, mask and lookup tables) and the audio
+            path (muse_audio.c: the I2S staging and chirp buffers), about
+            17 KB, in PSRAM instead of internal RAM (linker.lf). Only the
+            CPU touches them: the avatar is scaled into LVGL's draw buffer,
+            and the I2S driver copies to and from its own DMA buffers. Turn
+            it on where internal RAM is short, as the SenseCAP Watcher does
+            to pay for the CPU's light-sleep retention memory, which it
+            takes at boot and keeps.
 
     config MUSE_HATCH
         bool "Muse's own voice session"
@@ -334,5 +383,18 @@ menu "Muse"
         string "ElevenLabs model ID"
         depends on MUSE_HATCH
         default "eleven_v4_turbo"
+
+    config MUSE_HATCH_COMPACT_BUFFERS
+        bool "Smaller voice session buffers, for 2 MB of PSRAM"
+        depends on MUSE_HATCH
+        default n
+        help
+            The voice session keeps about 830 KB of audio buffers in PSRAM:
+            512 KB of reply speech, 8 s of mic backlog and 2 s of decoded
+            audio. With 2 MB of PSRAM that leaves too little once Home Link
+            is connected, and a chat turn runs out of memory. This keeps
+            128 KB of speech, 2 s of mic backlog and 1 s of decoded audio
+            (about 220 KB), which still covers a push-to-talk turn. Board
+            overlays with 2 MB of PSRAM turn it on.
 
 endmenu

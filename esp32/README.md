@@ -112,6 +112,19 @@ idf.py build
 This builds for the ESP32-C5 DevKitC-1. The firmware lands in
 `build/muse-gadget.bin`.
 
+A build without a token can get one later over serial: send the line
+`>sdk_token=mgst_…` on the board's console, and it stores the token in NVS,
+answers `@sdk_token ok` and restarts with it. A stored token takes precedence
+over the build's. The [web flasher](../web-flasher/README.md) does this for
+you after installing.
+
+Muse records a gadget's SDK token when the gadget pairs, and nowhere else. If
+you change the token on a paired gadget, or revoke the one it paired with,
+pair it again: hold the button for 5 seconds, then pair it in the Muse app.
+Until then it keeps the token it paired with, and once that token is revoked it
+can't reach Muse. The boot log warns when the gadget is paired with a token
+other than its current one.
+
 ### 3. Flash
 
 Plug in the board and flash it:
@@ -149,7 +162,11 @@ connected.
 
 To reset the device and set it up again, hold the button for 5 seconds.
 
-Pairing requires a press of the button on the device, and every setup creates
+On the experimental EchoEar-2ST, press the screen to confirm pairing; after
+pairing, hold the screen microphone to record and release it to send. See
+[EchoEar setup](devices/ostb-echoear-2st.md) for its controls and validation limits.
+
+Pairing requires an explicit press on the device, and every setup creates
 a fresh encrypted session. Because these are community devices, pairing has no
 manufacturer verification and can't prevent an active man-in-the-middle
 attack. Set it up on a network you trust.
@@ -177,6 +194,7 @@ status screen.
 | Waveshare ESP32-S3-Touch-AMOLED-1.75C | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-1.75 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-S3-Touch-AMOLED-2.16 | UI, push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
+| OSTB EchoEar-2ST (experimental) | UI, touch microphone and pairing confirmation, local audio | [EchoEar setup](devices/ostb-echoear-2st.md) |
 | Espressif ESP32-S3-BOX-3 | UI, touch, push-to-talk, settings, images | [BOX-3 setup](devices/esp32-s3-box-3.md) |
 | AIPI Lite | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Waveshare ESP32-C6-Touch-AMOLED-1.8 | UI, push-to-talk with text replies | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
@@ -188,6 +206,7 @@ status screen.
 | M5Stack CoreS3 | UI, touch, PWR push-to-talk, settings, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | Guition JC3248W535 | UI, touch, settings, images, speaker; push-to-talk with an added I2S mic | `tools/muse/board.sh build jc3248w535` |
 | Waveshare ESP32-S3-Touch-LCD-7 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd7` |
+| Waveshare ESP32-S3-Touch-LCD-1.28 | UI, touch, settings, images; no built-in audio | `tools/muse/board.sh build lcd128` |
 | M5Stack StickC Plus2 | UI, push-to-talk, two-button menu, images | see [`AGENTS.md`](AGENTS.md#boards-with-the-full-ui-by-hand) |
 | M5Stack Core2 (v1.0) | UI, push-to-talk on the touch strip, touch menu, images | `tools/muse/board.sh build core2` |
 | Freenove FNK0104B | UI, touch, BOOT push-to-talk, settings, images | `tools/muse/board.sh build fnk0104b` |
@@ -205,6 +224,25 @@ Boards that support images can show pictures Muse sends them:
 Boards without PSRAM, like the classic ESP32 and the ESP32-C6, run without the
 home-network tunnel, which needs more memory than they have. Muse can still
 reach the device and control it.
+
+## Power characterization
+
+Start at [Power profiling](docs/power/README.md). Read the
+[PPK2 rules](docs/power/ppk2.md) before any PPK2 use; the SenseCAP Watcher has
+its own [USB-free procedure](docs/power/sensecap-watcher.md). The opt-in
+power-test image runs an autonomous, timestamped peripheral sweep after USB
+is removed; one PPK2 process keeps source power continuous through reconnect.
+Battery isolation and USB-charger backfeed protection are required before
+output is enabled. Diagnostic figures are not production application profiles.
+
+To profile another board or device, follow the
+[porting recipe](docs/power/README.md): labelled PPK2 capture for anything the
+PPK2 can power, or the board-neutral `CONFIG_MUSE_POWER_TEST` autonomous sweep.
+Implement the [board hook header](components/muse/boards/muse_power_test_board.h)
+and board-owned matrices; no core rename is needed. The shared host CLI is
+[`tools/power/power_sweep.py`](tools/power/power_sweep.py). Its analyzer uses the
+firmware-reported board name, with `--device` as an override and Watcher as the
+legacy-only fallback.
 
 ## Hack and extend it
 
@@ -244,9 +282,10 @@ things you can change:
 
 A few things worth knowing:
 
-- Your SDK token ships inside the firmware, so treat it as an identifier
-  rather than a password. If it leaks, revoke it on gadgets.muse.ai, generate
-  a new one, and rebuild.
+- Your SDK token ships inside the firmware, or sits in NVS if you set it over
+  serial, so treat it as an identifier rather than a password. If it leaks,
+  revoke it on gadgets.muse.ai, generate a new one, and rebuild or send the
+  new one over serial.
 - **We strongly recommend enabling NVS encryption** if your board supports it.
   NVS stores Wi-Fi credentials and device tokens in flash; without encryption,
   anyone with physical access to the board can read them. Enable it with
@@ -295,6 +334,9 @@ their upstream licenses:
   decoder, is CC0-1.0. See [`components/minimp3/LICENSE`](components/minimp3/LICENSE).
 - [`main/pixel_font.c`](main/pixel_font.c), the Adafruit GFX font, is
   BSD-2-Clause, as its header says.
+- [`components/muse/boards/ostb_echoear_display_init.h`](components/muse/boards/ostb_echoear_display_init.h),
+  the ST77916 panel initialization table from 78/xiaozhi-esp32, is MIT, as its
+  retained upstream notice says.
 
 ESP-IDF components fetched at build time (into `managed_components/`) are
 under their own licenses.
