@@ -19,7 +19,9 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "bsp/esp-bsp.h"
 #include "muse_input.h"
@@ -432,7 +434,8 @@ esp_err_t muse_head_init(i2c_master_bus_handle_t bus)
 
     ESP_LOGI(TAG, "servos powered (PY32 v%u), yaw zero %d, pitch zero %d", ver, CONFIG_MUSE_STACKCHAN_YAW_ZERO,
              CONFIG_MUSE_STACKCHAN_PITCH_ZERO);
-    xTaskCreate(head_task, "muse_head", 3072, NULL, 3, NULL);
+    /* Stacks in PSRAM: internal RAM is scarce, and the camera needs a 16 KB block of it. */
+    xTaskCreateWithCaps(head_task, "muse_head", 3072, NULL, 3, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     i2c_device_config_t tcfg = {
         .dev_addr_length = I2C_ADDR_BIT_LEN_7,
@@ -456,6 +459,6 @@ esp_err_t muse_head_init(i2c_master_bus_handle_t bus)
     } else {
         prox_probe();
     }
-    xTaskCreate(body_task, "muse_body", 3072, NULL, 3, NULL);
+    xTaskCreateWithCaps(body_task, "muse_body", 3072, NULL, 3, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     return ESP_OK;
 }

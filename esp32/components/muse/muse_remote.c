@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_netif.h"
@@ -133,6 +134,7 @@ static void start_server(void)
     cfg.server_port = CONFIG_MUSE_REMOTE_PORT;
     cfg.max_open_sockets = 3;
     cfg.stack_size = 8192;   /* the photo handler runs the camera and JPEG encoder */
+    cfg.task_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT;   /* its stack in PSRAM: internal RAM is scarce */
     httpd_handle_t srv;
     if (httpd_start(&srv, &cfg) != ESP_OK) {
         ESP_LOGW(TAG, "could not start the server");
