@@ -4,7 +4,7 @@ Additions to the [Muse Gadget SDK](https://github.com/facebookincubator/muse-gad
 [M5Stack StackChan](https://docs.m5stack.com/en/StackChan): a CoreS3 on a robot body with two servos, a
 three-zone touch strip, a proximity sensor, a camera and an IR receiver and LED. The SDK already runs a CoreS3
 (`tools/muse/board.sh build cores3`); this adds the body, a voice that speaks Muse's replies, better speech
-recognition for Cantonese and English, and a Wi-Fi trigger. Built on SDK commit `812c46f`.
+recognition for Cantonese and English, and a Wi-Fi trigger. Built on Meta's SDK as of 16 October 2026 (upstream commit `f60347a`): first made from commit `812c46f`, then merged with the newer SDK (new boards, SDK-token pairing, web flasher).
 
 Tested on one StackChan with Muse. Flashing custom firmware can brick a board; the SDK's own warning applies.
 
@@ -85,6 +85,7 @@ Servo, expander, touch and IR details come from M5Stack's [StackChan-BSP](https:
   the token are in the firmware.
 - **Privacy:** speech goes to Muse and, with Scribe on, to ElevenLabs; photos go to Muse or your computer only
   when asked.
+- **Internal RAM is tight.** The camera's DMA buffer needs a 16 KB contiguous block of internal RAM, and Meta's newer SDK left only 10 KB. The head, touch and Wi-Fi-server task stacks now live in PSRAM, which brings the largest free block to about 32 KB. Watch `int=free/largest` in the boot log, and re-test a photo after adding features.
 - **Battery:** on battery the Wi-Fi sleeps after the screen has been asleep a while, and the Wi-Fi trigger can't
   reach the device until it wakes.
 - **Not included:** the avatar. Your Muse draws it with `tools/muse/avatar.py`; the SDK ignores the result

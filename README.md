@@ -53,6 +53,8 @@ head gestures ◀─ reply tone          camera ◀─ Muse asks for a photo
 - The microphone gain was already at the chip's maximum, so "more sensitive" had to be done in software.
 - A fixed "is this speech?" level fails in a room with a fan; it has to be relative to the room's noise.
 - M5Stack's camera needs its sensor driver switched on and a smaller DMA buffer to fit in memory here.
+- Merging Meta's newer SDK ate enough internal RAM to break the camera again. Moving my background tasks' stacks to
+  PSRAM fixed it (the largest free block went from 10 KB to 32 KB).
 
 ## Try it
 
